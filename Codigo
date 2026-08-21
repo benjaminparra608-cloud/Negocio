@@ -1,0 +1,917 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  LayoutDashboard, Package, ShoppingCart, Truck, Receipt, Plus, Trash2,
+  Pencil, X, AlertTriangle, Star, Search, TrendingUp, TrendingDown,
+  DollarSign, ArrowUpRight, ArrowDownRight, Loader2
+} from "lucide-react";
+
+const STORAGE_KEY = "negocio-data-v1";
+
+const emptyData = { products: [], sales: [], purchases: [], expenses: [] };
+
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const money = (n) =>
+  new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(
+    Math.round(Number(n) || 0)
+  );
+
+const dateFmt = (d) => {
+  try {
+    return new Date(d + "T00:00:00").toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
+  } catch {
+    return d;
+  }
+};
+
+const isThisMonth = (d) => {
+  const now = new Date();
+  const dd = new Date(d + "T00:00:00");
+  return dd.getFullYear() === now.getFullYear() && dd.getMonth() === now.getMonth();
+};
+
+const CATEGORY_OPTIONS_EXPENSE = ["Arriendo", "Servicios", "Sueldos", "Transporte", "Marketing", "Insumos", "Otro"];
+
+export default function App() {
+  const [data, setData] = useState(emptyData);
+  const [loaded, setLoaded] = useState(false);
+  const [saveState, setSaveState] = useState("idle");
+  const [tab, setTab] = useState("dashboard");
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY, false);
+        if (!cancelled && res && res.value) {
+          const parsed = JSON.parse(res.value);
+          setData({ ...emptyData, ...parsed });
+        }
+      } catch (e) {
+        // no existing data yet, that's fine
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const persist = useCallback(async (next) => {
+    setData(next);
+    setSaveState("saving");
+    try {
+      const res = await window.storage.set(STORAGE_KEY, JSON.stringify(next), false);
+      setSaveState(res ? "saved" : "error");
+      if (res) setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1500);
+    } catch (e) {
+      setSaveState("error");
+      setError("No se pudo guardar. Tus cambios se mantienen en esta sesión.");
+    }
+  }, []);
+
+  const productMap = useMemo(() => {
+    const m = {};
+    data.products.forEach((p) => (m[p.id] = p));
+    return m;
+  }, [data.products]);
+
+  // ---- derived metrics ----
+  const salesThisMonth = useMemo(() => data.sales.filter((s) => isThisMonth(s.date)), [data.sales]);
+  const expensesThisMonth = useMemo(() => data.expenses.filter((e) => isThisMonth(e.date)), [data.expenses]);
+  const purchasesThisMonth = useMemo(() => data.purchases.filter((p) => isThisMonth(p.date)), [data.purchases]);
+
+  const totalSalesMonth = salesThisMonth.reduce((a, s) => a + s.qty * s.unitPrice, 0);
+  const totalExpensesMonth = expensesThisMonth.reduce((a, e) => a + Number(e.amount), 0);
+  const totalPurchasesMonth = purchasesThisMonth.reduce((a, p) => a + p.qty * p.unitCost, 0);
+  const gananciaMonth = totalSalesMonth - totalExpensesMonth - totalPurchasesMonth;
+
+  const lowStock = useMemo(
+    () => data.products.filter((p) => Number(p.stock) <= Number(p.minStock ?? 0)),
+    [data.products]
+  );
+
+  const topSellers = useMemo(() => {
+    const totals = {};
+    data.sales.forEach((s) => {
+      totals[s.productId] = (totals[s.productId] || 0) + Number(s.qty);
+    });
+    return Object.entries(totals)
+      .map(([productId, qty]) => ({ productId, qty, product: productMap[productId] }))
+      .filter((x) => x.product)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 5);
+  }, [data.sales, productMap]);
+
+  const maxTopQty = topSellers.length ? topSellers[0].qty : 1;
+
+  const recentActivity = useMemo(() => {
+    const items = [
+      ...data.sales.map((s) => ({ type: "venta", date: s.date, ts: s.createdAt, label: productMap[s.productId]?.name || "Producto eliminado", detail: `${s.qty} u. · ${money(s.qty * s.unitPrice)}` })),
+      ...data.purchases.map((p) => ({ type: "compra", date: p.date, ts: p.createdAt, label: productMap[p.productId]?.name || "Producto eliminado", detail: `${p.qty} u. · ${money(p.qty * p.unitCost)}` })),
+      ...data.expenses.map((e) => ({ type: "gasto", date: e.date, ts: e.createdAt, label: e.category, detail: `${e.description || ""} · ${money(e.amount)}` })),
+    ];
+    return items.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 8);
+  }, [data, productMap]);
+
+  // ---- mutations ----
+  const addProduct = (p) => persist({ ...data, products: [...data.products, { ...p, id: uid(), createdAt: Date.now() }] });
+  const updateProduct = (id, patch) =>
+    persist({ ...data, products: data.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  const deleteProduct = (id) => persist({ ...data, products: data.products.filter((p) => p.id !== id) });
+
+  const addSale = (s) => {
+    const product = productMap[s.productId];
+    if (!product) return;
+    const nextProducts = data.products.map((p) =>
+      p.id === s.productId ? { ...p, stock: Number(p.stock) - Number(s.qty) } : p
+    );
+    persist({ ...data, products: nextProducts, sales: [...data.sales, { ...s, id: uid(), createdAt: Date.now() }] });
+  };
+  const deleteSale = (id) => {
+    const sale = data.sales.find((s) => s.id === id);
+    let nextProducts = data.products;
+    if (sale && productMap[sale.productId]) {
+      nextProducts = data.products.map((p) =>
+        p.id === sale.productId ? { ...p, stock: Number(p.stock) + Number(sale.qty) } : p
+      );
+    }
+    persist({ ...data, products: nextProducts, sales: data.sales.filter((s) => s.id !== id) });
+  };
+
+  const addPurchase = (pu) => {
+    const product = productMap[pu.productId];
+    if (!product) return;
+    const nextProducts = data.products.map((p) =>
+      p.id === pu.productId ? { ...p, stock: Number(p.stock) + Number(pu.qty), costPrice: pu.unitCost } : p
+    );
+    persist({ ...data, products: nextProducts, purchases: [...data.purchases, { ...pu, id: uid(), createdAt: Date.now() }] });
+  };
+  const deletePurchase = (id) => {
+    const pur = data.purchases.find((p) => p.id === id);
+    let nextProducts = data.products;
+    if (pur && productMap[pur.productId]) {
+      nextProducts = data.products.map((p) =>
+        p.id === pur.productId ? { ...p, stock: Math.max(0, Number(p.stock) - Number(pur.qty)) } : p
+      );
+    }
+    persist({ ...data, products: nextProducts, purchases: data.purchases.filter((p) => p.id !== id) });
+  };
+
+  const addExpense = (e) => persist({ ...data, expenses: [...data.expenses, { ...e, id: uid(), createdAt: Date.now() }] });
+  const deleteExpense = (id) => persist({ ...data, expenses: data.expenses.filter((e) => e.id !== id) });
+
+  if (!loaded) {
+    return (
+      <div style={styles.loadingScreen}>
+        <style>{globalCss}</style>
+        <Loader2 className="spin" size={28} color="#E8A63D" />
+        <p style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#EDEAE1", marginTop: 12 }}>Abriendo el libro de negocio...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.app}>
+      <style>{globalCss}</style>
+      <Sidebar tab={tab} setTab={setTab} lowStockCount={lowStock.length} saveState={saveState} />
+      <main style={styles.main}>
+        {error && (
+          <div style={styles.errorBanner}>
+            <AlertTriangle size={16} />
+            <span>{error}</span>
+            <button onClick={() => setError(null)} style={styles.errorClose}><X size={14} /></button>
+          </div>
+        )}
+        {tab === "dashboard" && (
+          <Dashboard
+            totalSalesMonth={totalSalesMonth}
+            totalExpensesMonth={totalExpensesMonth}
+            totalPurchasesMonth={totalPurchasesMonth}
+            gananciaMonth={gananciaMonth}
+            lowStock={lowStock}
+            topSellers={topSellers}
+            maxTopQty={maxTopQty}
+            recentActivity={recentActivity}
+            productCount={data.products.length}
+          />
+        )}
+        {tab === "inventario" && (
+          <Inventario products={data.products} onAdd={addProduct} onUpdate={updateProduct} onDelete={deleteProduct} />
+        )}
+        {tab === "ventas" && (
+          <Ventas products={data.products} sales={data.sales} productMap={productMap} onAdd={addSale} onDelete={deleteSale} />
+        )}
+        {tab === "compras" && (
+          <Compras products={data.products} purchases={data.purchases} productMap={productMap} onAdd={addPurchase} onDelete={deletePurchase} />
+        )}
+        {tab === "gastos" && <Gastos expenses={data.expenses} onAdd={addExpense} onDelete={deleteExpense} />}
+      </main>
+    </div>
+  );
+}
+
+// ============================= SIDEBAR =============================
+
+function Sidebar({ tab, setTab, lowStockCount, saveState }) {
+  const items = [
+    { id: "dashboard", label: "Panel", icon: LayoutDashboard },
+    { id: "inventario", label: "Inventario", icon: Package, badge: lowStockCount },
+    { id: "ventas", label: "Ventas", icon: ShoppingCart },
+    { id: "compras", label: "Compras", icon: Truck },
+    { id: "gastos", label: "Gastos", icon: Receipt },
+  ];
+  return (
+    <aside style={styles.sidebar}>
+      <div style={styles.brand}>
+        <div style={styles.brandMark}>MN</div>
+        <div>
+          <div style={styles.brandTitle}>Mi Negocio</div>
+          <div style={styles.brandSub}>Libro de control</div>
+        </div>
+      </div>
+      <nav style={styles.nav}>
+        {items.map((it) => {
+          const Icon = it.icon;
+          const active = tab === it.id;
+          return (
+            <button key={it.id} onClick={() => setTab(it.id)} style={{ ...styles.navItem, ...(active ? styles.navItemActive : {}) }}>
+              <Icon size={17} strokeWidth={2} />
+              <span>{it.label}</span>
+              {!!it.badge && <span style={styles.navBadge}>{it.badge}</span>}
+            </button>
+          );
+        })}
+      </nav>
+      <div style={styles.saveIndicator}>
+        <span style={{ ...styles.saveDot, background: saveState === "error" ? "#E1613D" : "#4FB3A9" }} />
+        {saveState === "saving" ? "Guardando..." : saveState === "error" ? "Sin guardar" : "Datos al día"}
+      </div>
+    </aside>
+  );
+}
+
+// ============================= DASHBOARD =============================
+
+function Dashboard({ totalSalesMonth, totalExpensesMonth, totalPurchasesMonth, gananciaMonth, lowStock, topSellers, maxTopQty, recentActivity, productCount }) {
+  return (
+    <div>
+      <PageHeader eyebrow="Este mes" title="Panel general" subtitle="Cómo va tu negocio de un vistazo." />
+
+      <div style={styles.kpiGrid}>
+        <KpiCard label="Ventas del mes" value={money(totalSalesMonth)} icon={TrendingUp} tone="teal" />
+        <KpiCard label="Compras del mes" value={money(totalPurchasesMonth)} icon={Truck} tone="amber" />
+        <KpiCard label="Gastos del mes" value={money(totalExpensesMonth)} icon={Receipt} tone="coral" />
+        <KpiCard
+          label="Ganancia estimada"
+          value={money(gananciaMonth)}
+          icon={gananciaMonth >= 0 ? ArrowUpRight : ArrowDownRight}
+          tone={gananciaMonth >= 0 ? "teal" : "coral"}
+        />
+      </div>
+
+      <div style={styles.dashGrid}>
+        <section style={styles.panel}>
+          <h3 style={styles.panelTitle}><Star size={15} color="#E8A63D" fill="#E8A63D" /> Productos más vendidos</h3>
+          {topSellers.length === 0 ? (
+            <EmptyNote text="Aún no hay ventas registradas. Cuando registres una venta, aparecerá aquí." />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 14 }}>
+              {topSellers.map((t, i) => (
+                <div key={t.productId}>
+                  <div style={styles.barRow}>
+                    <span style={styles.barRank}>{i + 1}</span>
+                    <span style={styles.barLabel}>{t.product.name}</span>
+                    <span style={styles.barQty}>{t.qty} u.</span>
+                  </div>
+                  <div style={styles.barTrack}>
+                    <div style={{ ...styles.barFill, width: `${(t.qty / maxTopQty) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section style={styles.panel}>
+          <h3 style={styles.panelTitle}><AlertTriangle size={15} color="#E1613D" /> Stock bajo</h3>
+          {lowStock.length === 0 ? (
+            <EmptyNote text={productCount === 0 ? "Registra tu primer producto en Inventario." : "Todo tu stock está por sobre el mínimo. Bien ahí."} />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+              {lowStock.map((p) => (
+                <div key={p.id} style={styles.lowStockRow}>
+                  <span>{p.name}</span>
+                  <span style={styles.lowStockQty}>{p.stock} / mín. {p.minStock ?? 0}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section style={{ ...styles.panel, marginTop: 20 }}>
+        <h3 style={styles.panelTitle}>Actividad reciente</h3>
+        {recentActivity.length === 0 ? (
+          <EmptyNote text="Todavía no hay movimientos. Registra una venta, compra o gasto para verlo aquí." />
+        ) : (
+          <div style={{ marginTop: 10 }}>
+            {recentActivity.map((a, i) => (
+              <div key={i} style={styles.activityRow}>
+                <span style={{ ...styles.activityTag, ...activityTagStyle(a.type) }}>{a.type}</span>
+                <span style={styles.activityLabel}>{a.label}</span>
+                <span style={styles.activityDetail}>{a.detail}</span>
+                <span style={styles.activityDate}>{dateFmt(a.date)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function activityTagStyle(type) {
+  if (type === "venta") return { background: "#1E3A34", color: "#7FD9C4" };
+  if (type === "compra") return { background: "#3A2E17", color: "#E8A63D" };
+  return { background: "#3A1F17", color: "#F0987B" };
+}
+
+function KpiCard({ label, value, icon: Icon, tone }) {
+  const toneColor = { teal: "#4FB3A9", amber: "#E8A63D", coral: "#E1613D" }[tone] || "#4FB3A9";
+  return (
+    <div style={styles.kpiCard}>
+      <div style={styles.kpiTop}>
+        <span style={styles.kpiLabel}>{label}</span>
+        <Icon size={16} color={toneColor} />
+      </div>
+      <div style={styles.kpiValue}>{value}</div>
+    </div>
+  );
+}
+
+function EmptyNote({ text }) {
+  return <p style={styles.emptyNote}>{text}</p>;
+}
+
+function PageHeader({ eyebrow, title, subtitle, action }) {
+  return (
+    <div style={styles.pageHeader}>
+      <div>
+        <div style={styles.eyebrow}>{eyebrow}</div>
+        <h2 style={styles.pageTitle}>{title}</h2>
+        {subtitle && <p style={styles.pageSubtitle}>{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// ============================= INVENTARIO =============================
+
+function Inventario({ products, onAdd, onUpdate, onDelete }) {
+  const [query, setQuery] = useState("");
+  const [modal, setModal] = useState(null); // null | 'new' | product object
+
+  const filtered = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || (p.sku || "").toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Inventario"
+        title="Tus productos"
+        subtitle="Cada ficha es una etiqueta de bodega: precio, costo y stock al tiro."
+        action={<button style={styles.primaryBtn} onClick={() => setModal("new")}><Plus size={16} /> Nuevo producto</button>}
+      />
+
+      <div style={styles.searchWrap}>
+        <Search size={15} color="#8B93A0" />
+        <input style={styles.searchInput} placeholder="Buscar por nombre o SKU..." value={query} onChange={(e) => setQuery(e.target.value)} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyNote text={products.length === 0 ? "No tienes productos todavía. Crea el primero con “Nuevo producto”." : "Nada coincide con esa búsqueda."} />
+      ) : (
+        <div style={styles.tagGrid}>
+          {filtered.map((p) => (
+            <ProductTag key={p.id} product={p} onEdit={() => setModal(p)} onDelete={() => onDelete(p.id)} />
+          ))}
+        </div>
+      )}
+
+      {modal && (
+        <ProductModal
+          initial={modal === "new" ? null : modal}
+          onClose={() => setModal(null)}
+          onSave={(payload) => {
+            if (modal === "new") onAdd(payload);
+            else onUpdate(modal.id, payload);
+            setModal(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProductTag({ product, onEdit, onDelete }) {
+  const low = Number(product.stock) <= Number(product.minStock ?? 0);
+  return (
+    <div style={styles.tag}>
+      <div style={styles.tagNotches}>
+        {Array.from({ length: 8 }).map((_, i) => (
+          <span key={i} style={styles.tagNotch} />
+        ))}
+      </div>
+      <div style={styles.tagBody}>
+        <div style={styles.tagHeadRow}>
+          <span style={styles.tagCategory}>{product.category || "General"}</span>
+          {low && <span style={styles.tagLowBadge}><AlertTriangle size={11} /> bajo</span>}
+        </div>
+        <div style={styles.tagName}>{product.name}</div>
+        <div style={styles.tagSku}>SKU {product.sku || "—"}</div>
+        <div style={styles.tagDivider} />
+        <div style={styles.tagRow}>
+          <span>Precio venta</span>
+          <strong>{money(product.salePrice)}</strong>
+        </div>
+        <div style={styles.tagRow}>
+          <span>Costo</span>
+          <strong>{money(product.costPrice)}</strong>
+        </div>
+        <div style={styles.tagRow}>
+          <span>Stock</span>
+          <strong style={low ? { color: "#F0987B" } : undefined}>{product.stock} u.</strong>
+        </div>
+        <div style={styles.tagActions}>
+          <button style={styles.tagBtn} onClick={onEdit}><Pencil size={13} /> Editar</button>
+          <button style={{ ...styles.tagBtn, color: "#E1613D" }} onClick={onDelete}><Trash2 size={13} /> Eliminar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductModal({ initial, onClose, onSave }) {
+  const [form, setForm] = useState(
+    initial || { name: "", category: "", sku: "", stock: 0, minStock: 0, costPrice: 0, salePrice: 0 }
+  );
+  const [err, setErr] = useState("");
+
+  const submit = () => {
+    if (!form.name.trim()) { setErr("Ponle un nombre al producto."); return; }
+    if (Number(form.salePrice) < 0 || Number(form.costPrice) < 0 || Number(form.stock) < 0) { setErr("Los montos no pueden ser negativos."); return; }
+    onSave({
+      ...form,
+      stock: Number(form.stock),
+      minStock: Number(form.minStock),
+      costPrice: Number(form.costPrice),
+      salePrice: Number(form.salePrice),
+    });
+  };
+
+  return (
+    <Modal title={initial ? "Editar producto" : "Nuevo producto"} onClose={onClose}>
+      <FormRow label="Nombre">
+        <input style={styles.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ej: Polera algodón" />
+      </FormRow>
+      <div style={styles.formTwoCol}>
+        <FormRow label="Categoría">
+          <input style={styles.input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Ej: Ropa" />
+        </FormRow>
+        <FormRow label="SKU">
+          <input style={styles.input} value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="Ej: POL-001" />
+        </FormRow>
+      </div>
+      <div style={styles.formTwoCol}>
+        <FormRow label="Precio de costo">
+          <input style={styles.input} type="number" min="0" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: e.target.value })} />
+        </FormRow>
+        <FormRow label="Precio de venta">
+          <input style={styles.input} type="number" min="0" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: e.target.value })} />
+        </FormRow>
+      </div>
+      <div style={styles.formTwoCol}>
+        <FormRow label="Stock actual">
+          <input style={styles.input} type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
+        </FormRow>
+        <FormRow label="Stock mínimo (alerta)">
+          <input style={styles.input} type="number" min="0" value={form.minStock} onChange={(e) => setForm({ ...form, minStock: e.target.value })} />
+        </FormRow>
+      </div>
+      {err && <p style={styles.formError}>{err}</p>}
+      <div style={styles.modalActions}>
+        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+        <button style={styles.primaryBtn} onClick={submit}>Guardar producto</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================= VENTAS =============================
+
+function Ventas({ products, sales, productMap, onAdd, onDelete }) {
+  const [modal, setModal] = useState(false);
+  const sorted = [...sales].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Ventas"
+        title="Registro de ventas"
+        subtitle="Cada venta descuenta stock automáticamente."
+        action={<button style={styles.primaryBtn} onClick={() => setModal(true)} disabled={products.length === 0}><Plus size={16} /> Nueva venta</button>}
+      />
+      {products.length === 0 && <EmptyNote text="Primero crea productos en Inventario para poder venderlos." />}
+      {sorted.length === 0 && products.length > 0 ? (
+        <EmptyNote text="No has registrado ventas todavía." />
+      ) : (
+        <MovementTable
+          rows={sorted}
+          columns={["Fecha", "Producto", "Cantidad", "Precio unit.", "Total", ""]}
+          renderRow={(s) => (
+            <>
+              <td>{dateFmt(s.date)}</td>
+              <td>{productMap[s.productId]?.name || "Producto eliminado"}</td>
+              <td>{s.qty}</td>
+              <td>{money(s.unitPrice)}</td>
+              <td style={{ color: "#7FD9C4", fontWeight: 600 }}>{money(s.qty * s.unitPrice)}</td>
+              <td><button style={styles.rowDeleteBtn} onClick={() => onDelete(s.id)}><Trash2 size={13} /></button></td>
+            </>
+          )}
+        />
+      )}
+      {modal && (
+        <SaleModal
+          products={products}
+          onClose={() => setModal(false)}
+          onSave={(payload) => { onAdd(payload); setModal(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SaleModal({ products, onClose, onSave }) {
+  const [productId, setProductId] = useState(products[0]?.id || "");
+  const [qty, setQty] = useState(1);
+  const [unitPrice, setUnitPrice] = useState(products[0]?.salePrice || 0);
+  const [date, setDate] = useState(todayStr());
+  const [err, setErr] = useState("");
+
+  const selected = products.find((p) => p.id === productId);
+
+  useEffect(() => {
+    if (selected) setUnitPrice(selected.salePrice);
+  }, [productId]);
+
+  const submit = () => {
+    if (!selected) { setErr("Selecciona un producto."); return; }
+    if (Number(qty) <= 0) { setErr("La cantidad debe ser mayor a 0."); return; }
+    if (Number(qty) > Number(selected.stock)) { setErr(`Solo hay ${selected.stock} unidades en stock.`); return; }
+    onSave({ productId, qty: Number(qty), unitPrice: Number(unitPrice), date });
+  };
+
+  return (
+    <Modal title="Registrar venta" onClose={onClose}>
+      <FormRow label="Producto">
+        <select style={styles.input} value={productId} onChange={(e) => setProductId(e.target.value)}>
+          {products.map((p) => (
+            <option key={p.id} value={p.id}>{p.name} · stock {p.stock}</option>
+          ))}
+        </select>
+      </FormRow>
+      <div style={styles.formTwoCol}>
+        <FormRow label="Cantidad">
+          <input style={styles.input} type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} />
+        </FormRow>
+        <FormRow label="Precio unitario">
+          <input style={styles.input} type="number" min="0" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
+        </FormRow>
+      </div>
+      <FormRow label="Fecha">
+        <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </FormRow>
+      <p style={styles.totalPreview}>Total: <strong>{money(Number(qty) * Number(unitPrice))}</strong></p>
+      {err && <p style={styles.formError}>{err}</p>}
+      <div style={styles.modalActions}>
+        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+        <button style={styles.primaryBtn} onClick={submit}>Registrar venta</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================= COMPRAS =============================
+
+function Compras({ products, purchases, productMap, onAdd, onDelete }) {
+  const [modal, setModal] = useState(false);
+  const sorted = [...purchases].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Compras"
+        title="Registro de compras"
+        subtitle="Cada compra suma stock y actualiza el costo del producto."
+        action={<button style={styles.primaryBtn} onClick={() => setModal(true)} disabled={products.length === 0}><Plus size={16} /> Nueva compra</button>}
+      />
+      {products.length === 0 && <EmptyNote text="Primero crea productos en Inventario para poder comprarlos." />}
+      {sorted.length === 0 && products.length > 0 ? (
+        <EmptyNote text="No has registrado compras todavía." />
+      ) : (
+        <MovementTable
+          rows={sorted}
+          columns={["Fecha", "Producto", "Proveedor", "Cantidad", "Costo unit.", "Total", ""]}
+          renderRow={(p) => (
+            <>
+              <td>{dateFmt(p.date)}</td>
+              <td>{productMap[p.productId]?.name || "Producto eliminado"}</td>
+              <td>{p.vendor || "—"}</td>
+              <td>{p.qty}</td>
+              <td>{money(p.unitCost)}</td>
+              <td style={{ color: "#E8A63D", fontWeight: 600 }}>{money(p.qty * p.unitCost)}</td>
+              <td><button style={styles.rowDeleteBtn} onClick={() => onDelete(p.id)}><Trash2 size={13} /></button></td>
+            </>
+          )}
+        />
+      )}
+      {modal && (
+        <PurchaseModal
+          products={products}
+          onClose={() => setModal(false)}
+          onSave={(payload) => { onAdd(payload); setModal(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PurchaseModal({ products, onClose, onSave }) {
+  const [productId, setProductId] = useState(products[0]?.id || "");
+  const [qty, setQty] = useState(1);
+  const [unitCost, setUnitCost] = useState(products[0]?.costPrice || 0);
+  const [vendor, setVendor] = useState("");
+  const [date, setDate] = useState(todayStr());
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    const p = products.find((x) => x.id === productId);
+    if (p) setUnitCost(p.costPrice);
+  }, [productId]);
+
+  const submit = () => {
+    if (!productId) { setErr("Selecciona un producto."); return; }
+    if (Number(qty) <= 0) { setErr("La cantidad debe ser mayor a 0."); return; }
+    onSave({ productId, qty: Number(qty), unitCost: Number(unitCost), vendor, date });
+  };
+
+  return (
+    <Modal title="Registrar compra" onClose={onClose}>
+      <FormRow label="Producto">
+        <select style={styles.input} value={productId} onChange={(e) => setProductId(e.target.value)}>
+          {products.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </FormRow>
+      <FormRow label="Proveedor">
+        <input style={styles.input} value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Ej: Distribuidora Central" />
+      </FormRow>
+      <div style={styles.formTwoCol}>
+        <FormRow label="Cantidad">
+          <input style={styles.input} type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} />
+        </FormRow>
+        <FormRow label="Costo unitario">
+          <input style={styles.input} type="number" min="0" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
+        </FormRow>
+      </div>
+      <FormRow label="Fecha">
+        <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </FormRow>
+      <p style={styles.totalPreview}>Total: <strong>{money(Number(qty) * Number(unitCost))}</strong></p>
+      {err && <p style={styles.formError}>{err}</p>}
+      <div style={styles.modalActions}>
+        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+        <button style={styles.primaryBtn} onClick={submit}>Registrar compra</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================= GASTOS =============================
+
+function Gastos({ expenses, onAdd, onDelete }) {
+  const [modal, setModal] = useState(false);
+  const sorted = [...expenses].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow="Gastos"
+        title="Registro de gastos"
+        subtitle="Arriendo, servicios, sueldos y todo lo que no es compra de mercadería."
+        action={<button style={styles.primaryBtn} onClick={() => setModal(true)}><Plus size={16} /> Nuevo gasto</button>}
+      />
+      {sorted.length === 0 ? (
+        <EmptyNote text="No has registrado gastos todavía." />
+      ) : (
+        <MovementTable
+          rows={sorted}
+          columns={["Fecha", "Categoría", "Descripción", "Monto", ""]}
+          renderRow={(e) => (
+            <>
+              <td>{dateFmt(e.date)}</td>
+              <td>{e.category}</td>
+              <td>{e.description || "—"}</td>
+              <td style={{ color: "#F0987B", fontWeight: 600 }}>{money(e.amount)}</td>
+              <td><button style={styles.rowDeleteBtn} onClick={() => onDelete(e.id)}><Trash2 size={13} /></button></td>
+            </>
+          )}
+        />
+      )}
+      {modal && (
+        <ExpenseModal onClose={() => setModal(false)} onSave={(payload) => { onAdd(payload); setModal(false); }} />
+      )}
+    </div>
+  );
+}
+
+function ExpenseModal({ onClose, onSave }) {
+  const [category, setCategory] = useState(CATEGORY_OPTIONS_EXPENSE[0]);
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState(0);
+  const [date, setDate] = useState(todayStr());
+  const [err, setErr] = useState("");
+
+  const submit = () => {
+    if (Number(amount) <= 0) { setErr("El monto debe ser mayor a 0."); return; }
+    onSave({ category, description, amount: Number(amount), date });
+  };
+
+  return (
+    <Modal title="Registrar gasto" onClose={onClose}>
+      <FormRow label="Categoría">
+        <select style={styles.input} value={category} onChange={(e) => setCategory(e.target.value)}>
+          {CATEGORY_OPTIONS_EXPENSE.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </FormRow>
+      <FormRow label="Descripción">
+        <input style={styles.input} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ej: Cuenta de luz agosto" />
+      </FormRow>
+      <div style={styles.formTwoCol}>
+        <FormRow label="Monto">
+          <input style={styles.input} type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </FormRow>
+        <FormRow label="Fecha">
+          <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </FormRow>
+      </div>
+      {err && <p style={styles.formError}>{err}</p>}
+      <div style={styles.modalActions}>
+        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+        <button style={styles.primaryBtn} onClick={submit}>Registrar gasto</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================= SHARED =============================
+
+function MovementTable({ rows, columns, renderRow }) {
+  return (
+    <div style={styles.tableWrap}>
+      <table style={styles.table}>
+        <thead>
+          <tr>
+            {columns.map((c, i) => <th key={i} style={styles.th}>{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} style={styles.tr}>{renderRow(r)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FormRow({ label, children }) {
+  return (
+    <label style={styles.formRow}>
+      <span style={styles.formLabel}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHead}>
+          <h3 style={styles.modalTitle}>{title}</h3>
+          <button style={styles.modalClose} onClick={onClose}><X size={16} /></button>
+        </div>
+        <div style={styles.modalBody}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================= STYLES =============================
+
+const globalCss = `
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+* { box-sizing: border-box; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+input, select, button { font-family: 'Inter', sans-serif; }
+input:focus, select:focus { outline: 2px solid #E8A63D; outline-offset: 1px; }
+button:focus-visible { outline: 2px solid #E8A63D; outline-offset: 1px; }
+::placeholder { color: #6B7280; }
+`;
+
+const styles = {
+  loadingScreen: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 480, background: "#12181F", borderRadius: 16 },
+  app: { display: "flex", minHeight: 640, background: "#12181F", fontFamily: "'Inter', sans-serif", borderRadius: 16, overflow: "hidden", border: "1px solid #232C37" },
+  sidebar: { width: 208, background: "#0E141B", padding: "20px 14px", display: "flex", flexDirection: "column", borderRight: "1px solid #232C37" },
+  brand: { display: "flex", alignItems: "center", gap: 10, padding: "0 6px 20px", borderBottom: "1px solid #232C37", marginBottom: 16 },
+  brandMark: { width: 34, height: 34, borderRadius: 8, background: "#E8A63D", color: "#412402", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 13 },
+  brandTitle: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14, lineHeight: 1.2 },
+  brandSub: { color: "#6B7480", fontSize: 11, marginTop: 2 },
+  nav: { display: "flex", flexDirection: "column", gap: 3, flex: 1 },
+  navItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, background: "transparent", border: "none", color: "#9AA2AE", fontSize: 13.5, fontWeight: 500, cursor: "pointer", textAlign: "left", position: "relative" },
+  navItemActive: { background: "#1B232D", color: "#EDEAE1" },
+  navBadge: { marginLeft: "auto", background: "#E1613D", color: "#FCEBEB", fontSize: 10.5, fontWeight: 600, padding: "1px 6px", borderRadius: 10 },
+  saveIndicator: { display: "flex", alignItems: "center", gap: 7, color: "#6B7480", fontSize: 11, padding: "10px 6px 0", borderTop: "1px solid #232C37" },
+  saveDot: { width: 6, height: 6, borderRadius: "50%", display: "inline-block" },
+  main: { flex: 1, padding: "26px 30px 40px", overflowY: "auto", maxHeight: 780 },
+  errorBanner: { display: "flex", alignItems: "center", gap: 8, background: "#3A1F17", color: "#F0987B", padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 16 },
+  errorClose: { marginLeft: "auto", background: "none", border: "none", color: "#F0987B", cursor: "pointer" },
+  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 22, gap: 16, flexWrap: "wrap" },
+  eyebrow: { color: "#E8A63D", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 },
+  pageTitle: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 22, margin: 0 },
+  pageSubtitle: { color: "#8B93A0", fontSize: 13, marginTop: 5, maxWidth: 440 },
+  kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 22 },
+  kpiCard: { background: "#1B232D", borderRadius: 10, padding: "14px 16px", border: "1px solid #232C37" },
+  kpiTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  kpiLabel: { color: "#8B93A0", fontSize: 12 },
+  kpiValue: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 20 },
+  dashGrid: { display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16 },
+  panel: { background: "#1B232D", borderRadius: 10, padding: "18px 20px", border: "1px solid #232C37" },
+  panelTitle: { display: "flex", alignItems: "center", gap: 7, color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14.5, margin: 0 },
+  emptyNote: { color: "#6B7480", fontSize: 13, marginTop: 12, lineHeight: 1.5 },
+  barRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 5, fontSize: 12.5 },
+  barRank: { color: "#6B7480", width: 14, fontFamily: "'IBM Plex Mono', monospace" },
+  barLabel: { color: "#EDEAE1", flex: 1 },
+  barQty: { color: "#8B93A0", fontFamily: "'IBM Plex Mono', monospace" },
+  barTrack: { height: 6, background: "#0E141B", borderRadius: 4, overflow: "hidden" },
+  barFill: { height: "100%", background: "#E8A63D", borderRadius: 4 },
+  lowStockRow: { display: "flex", justifyContent: "space-between", fontSize: 13, color: "#EDEAE1", padding: "6px 0", borderBottom: "1px solid #232C37" },
+  lowStockQty: { color: "#F0987B", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 },
+  activityRow: { display: "grid", gridTemplateColumns: "70px 1fr auto auto", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #232C37", fontSize: 12.5 },
+  activityTag: { fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", padding: "2px 7px", borderRadius: 5, textAlign: "center", letterSpacing: "0.03em" },
+  activityLabel: { color: "#EDEAE1" },
+  activityDetail: { color: "#8B93A0", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5 },
+  activityDate: { color: "#6B7480", fontSize: 11.5, whiteSpace: "nowrap" },
+  searchWrap: { display: "flex", alignItems: "center", gap: 8, background: "#1B232D", border: "1px solid #232C37", borderRadius: 8, padding: "8px 12px", marginBottom: 18, maxWidth: 320 },
+  searchInput: { flex: 1, background: "transparent", border: "none", color: "#EDEAE1", fontSize: 13.5 },
+  tagGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 },
+  tag: { position: "relative", background: "#F3EFE4", borderRadius: 10, padding: "16px 16px 14px 20px", color: "#2B2A22" },
+  tagNotches: { position: "absolute", left: -1, top: 0, bottom: 0, width: 12, display: "flex", flexDirection: "column", justifyContent: "space-evenly", background: "#12181F", borderTopLeftRadius: 10, borderBottomLeftRadius: 10 },
+  tagNotch: { width: 8, height: 8, borderRadius: "50%", background: "#12181F", boxShadow: "0 0 0 8px #12181F, inset 0 0 0 8px #12181F" },
+  tagBody: { paddingLeft: 6 },
+  tagHeadRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  tagCategory: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "#8A7A4E" },
+  tagLowBadge: { display: "flex", alignItems: "center", gap: 3, background: "#F0997B", color: "#4A1B0C", fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 5 },
+  tagName: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 15.5, marginBottom: 2 },
+  tagSku: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#8A7A4E", marginBottom: 8 },
+  tagDivider: { borderTop: "1px dashed #C9C2AC", margin: "8px 0" },
+  tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3, color: "#4A4636" },
+  tagActions: { display: "flex", gap: 8, marginTop: 12 },
+  tagBtn: { display: "flex", alignItems: "center", gap: 4, background: "none", border: "1px solid #C9C2AC", borderRadius: 6, padding: "5px 9px", fontSize: 11.5, color: "#4A4636", cursor: "pointer" },
+  tableWrap: { background: "#1B232D", borderRadius: 10, border: "1px solid #232C37", overflow: "hidden" },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  th: { textAlign: "left", padding: "10px 14px", color: "#8B93A0", fontWeight: 500, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: "1px solid #232C37" },
+  tr: { borderBottom: "1px solid #232C37" },
+  rowDeleteBtn: { background: "none", border: "none", color: "#8B93A0", cursor: "pointer", padding: 4 },
+  primaryBtn: { display: "flex", alignItems: "center", gap: 6, background: "#E8A63D", color: "#412402", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer" },
+  secondaryBtn: { background: "transparent", color: "#8B93A0", border: "1px solid #2E3844", borderRadius: 8, padding: "9px 14px", fontWeight: 500, fontSize: 13, cursor: "pointer" },
+  overlay: { position: "fixed", inset: 0, background: "rgba(10,14,18,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 },
+  modal: { background: "#1B232D", border: "1px solid #2E3844", borderRadius: 12, width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" },
+  modalHead: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid #232C37" },
+  modalTitle: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 15.5, margin: 0 },
+  modalClose: { background: "none", border: "none", color: "#8B93A0", cursor: "pointer" },
+  modalBody: { padding: "18px 20px 20px" },
+  modalActions: { display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 },
+  formRow: { display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 },
+  formLabel: { color: "#8B93A0", fontSize: 12 },
+  formTwoCol: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+  input: { background: "#12181F", border: "1px solid #2E3844", borderRadius: 7, padding: "8px 10px", color: "#EDEAE1", fontSize: 13.5, width: "100%" },
+  formError: { color: "#F0987B", fontSize: 12.5, marginBottom: 8 },
+  totalPreview: { color: "#EDEAE1", fontSize: 13.5, marginBottom: 12 },
+};
