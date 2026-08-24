@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Almacen - Control Multi-Bodega & Acceso</title>
   <!-- Supabase JS Client CDN -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- React & Babel Standalone CDN -->
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -18,7 +18,7 @@
     #root { width: 100%; max-width: 1280px; }
     input, select, button { font-family: inherit; }
     input:focus, select:focus { outline: 2px solid #0c4f1c; outline-offset: 1px; }
-    button:focus-visible { outline: 2px solid #E8A63D; }
+    button:focus-visible { outline: 2px solid #0c4f1c; }
     ::placeholder { color: #6B7280; }
   </style>
 </head>
@@ -93,7 +93,7 @@
       const [locations] = useState(defaultLocations);
 
       // Modal de edición / creación de ventas
-      const [saleModalState, setSaleModalState] = useState(null); // null | 'new' | saleObj
+      const [saleModalState, setSaleModalState] = useState(null);
 
       useEffect(() => {
         localStorage.setItem(USERS_KEY, JSON.stringify(users));
@@ -218,7 +218,7 @@
             </nav>
 
             <div style={styles.footerStatus}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4FB3A9" }}></span>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#0c4f1c" }}></span>
               <span>Conectado: {currentUser.email}</span>
             </div>
           </aside>
@@ -245,7 +245,7 @@
                   </div>
                   <div style={styles.kpiCard}>
                     <span style={styles.kpiLabel}>Productos en Catálogo</span>
-                    <div style={{ ...styles.kpiValue, color: "#E8A63D" }}>{products.length} artículos</div>
+                    <div style={{ ...styles.kpiValue, color: "#0c4f1c" }}>{products.length} artículos</div>
                   </div>
                   <div style={styles.kpiCard}>
                     <span style={styles.kpiLabel}>Stock Crítico</span>
@@ -318,7 +318,7 @@
                 <div style={styles.dashGrid}>
                   {locations.map(loc => (
                     <div key={loc.id} style={styles.panel}>
-                      <h3 style={{ color: "#E8A63D", margin: "0 0 12px 0", fontSize: 16 }}>{loc.name}</h3>
+                      <h3 style={{ color: "#0c4f1c", margin: "0 0 12px 0", fontSize: 16 }}>{loc.name}</h3>
                       {products.map(p => (
                         <div key={p.id} style={styles.lowStockRow}>
                           <span>{p.name}</span>
@@ -375,7 +375,7 @@
                                 onClick={() => setSaleModalState(s)}
                                 title="Modificar venta"
                               >
-                                <Icon name="pencil" size={14} color="#E8A63D" />
+                                <Icon name="pencil" size={14} color="#0c4f1c" />
                               </button>
                               <button
                                 style={styles.actionIconBtn}
@@ -682,7 +682,7 @@
                   <tr key={u.id} style={{ borderBottom: "1px solid #232C37" }}>
                     <td style={{ padding: 10, fontWeight: 600 }}>{u.name}</td>
                     <td style={{ color: "#8B93A0" }}>{u.email}</td>
-                    <td><span style={styles.badgeOrange}>{u.role}</span></td>
+                    <td><span style={styles.badgeGreenTag}>{u.role}</span></td>
                     <td><span style={{ color: "#7FD9C4", fontSize: 12 }}>● Activo</span></td>
                   </tr>
                 ))}
@@ -731,14 +731,14 @@
       app: { display: "flex", minHeight: "92vh", background: "#12181F", color: "#EDEAE1", borderRadius: 12, overflow: "hidden", border: "1px solid #232C37" },
       sidebar: { width: 230, background: "#0E141B", padding: "18px 14px", display: "flex", flexDirection: "column", borderRight: "1px solid #232C37" },
       brand: { display: "flex", alignItems: "center", gap: 10, paddingBottom: 14, borderBottom: "1px solid #232C37" },
-      brandMark: { width: 34, height: 34, borderRadius: 8, background: "#E8A63D", color: "#412402", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13 },
+      brandMark: { width: 34, height: 34, borderRadius: 8, background: "#0c4f1c", color: "#EDEAE1", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13 },
       brandTitle: { fontWeight: 700, fontSize: 14.5, color: "#EDEAE1" },
       brandSub: { color: "#6B7480", fontSize: 10.5 },
       
       userCard: { display: "flex", alignItems: "center", gap: 9, background: "#1B232D", padding: "8px 10px", borderRadius: 8, margin: "14px 0 10px", border: "1px solid #232C37" },
-      userAvatar: { width: 30, height: 30, borderRadius: "50%", background: "#4FB3A9", color: "#0B2623", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 },
+      userAvatar: { width: 30, height: 30, borderRadius: "50%", background: "#0c4f1c", color: "#EDEAE1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 },
       userName: { fontSize: 12.5, fontWeight: 600, color: "#EDEAE1", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-      roleBadge: { fontSize: 9.5, color: "#E8A63D", textTransform: "uppercase", letterSpacing: "0.04em", display: "block" },
+      roleBadge: { fontSize: 9.5, color: "#7FD9C4", textTransform: "uppercase", letterSpacing: "0.04em", display: "block" },
       logoutBtn: { background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" },
 
       nav: { display: "flex", flexDirection: "column", gap: 4, flex: 1, marginTop: 6 },
@@ -749,7 +749,7 @@
 
       main: { flex: 1, padding: "26px 30px", overflowY: "auto" },
       pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-      eyebrow: { color: "#E8A63D", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em" },
+      eyebrow: { color: "#0c4f1c", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em" },
       pageTitle: { margin: "2px 0 0", fontSize: 21 },
       
       kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 20 },
@@ -766,22 +766,23 @@
       tag: { background: "#F3EFE4", color: "#2B2A22", borderRadius: 8, padding: 14 },
       tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12, margin: "3px 0", color: "#4A4636" },
       
-      primaryBtn: { background: "#E8A63D", color: "#412402", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 },
+      primaryBtn: { background: "#0c4f1c", color: "#EDEAE1", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 },
       secondaryBtn: { background: "transparent", color: "#EDEAE1", border: "1px solid #2E3844", borderRadius: 6, padding: "8px 14px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
       actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px" },
       
-      badgeOrange: { background: "#3A2E17", color: "#E8A63D", padding: "2px 7px", borderRadius: 4, fontSize: 11, fontWeight: 600 },
+      badgeGreenTag: { background: "#0c4f1c", color: "#EDEAE1", padding: "2px 7px", borderRadius: 4, fontSize: 11, fontWeight: 600 },
       badgeGray: { background: "#232C37", color: "#8B93A0", padding: "2px 7px", borderRadius: 4, fontSize: 11 },
 
+      // Pantalla de Autenticación
       authContainer: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "85vh" },
       authCard: { background: "#12181F", border: "1px solid #232C37", borderRadius: 12, padding: "28px 30px", width: "100%", maxWidth: 400 },
-      authLogo: { width: 44, height: 44, borderRadius: 10, background: "#E8A63D", color: "#412402", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 },
+      authLogo: { width: 44, height: 44, borderRadius: 10, background: "#0c4f1c", color: "#EDEAE1", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 },
       authTabs: { display: "flex", background: "#0E141B", padding: 3, borderRadius: 8, marginBottom: 18, border: "1px solid #232C37" },
       authTabBtn: { flex: 1, padding: "8px 0", background: "none", border: "none", color: "#8B93A0", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 6 },
-      authTabActive: { background: "#1B232D", color: "#EDEAE1" },
+      authTabActive: { background: "#0c4f1c", color: "#EDEAE1" },
       inputLabel: { display: "block", color: "#8B93A0", fontSize: 11.5, marginBottom: 5 },
       input: { background: "#0E141B", border: "1px solid #2E3844", borderRadius: 6, padding: "9px 12px", color: "#EDEAE1", fontSize: 13, width: "100%" },
-      submitBtn: { background: "#E8A63D", color: "#412402", border: "none", borderRadius: 6, padding: "10px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 6 },
+      submitBtn: { background: "#0c4f1c", color: "#EDEAE1", border: "none", borderRadius: 6, padding: "10px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 6 },
       errorMsg: { background: "#3A1F17", color: "#F0987B", padding: "8px 10px", borderRadius: 6, fontSize: 12 },
       demoSection: { marginTop: 18, paddingTop: 14, borderTop: "1px solid #232C37", textAlign: "center" },
       quickDemoBtn: { background: "#1B232D", border: "1px solid #2E3844", color: "#EDEAE1", padding: "4px 10px", borderRadius: 5, fontSize: 11, cursor: "pointer", flex: 1 },
