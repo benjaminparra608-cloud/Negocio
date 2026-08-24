@@ -1,917 +1,794 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import {
-  LayoutDashboard, Package, ShoppingCart, Truck, Receipt, Plus, Trash2,
-  Pencil, X, AlertTriangle, Star, Search, TrendingUp, TrendingDown,
-  DollarSign, ArrowUpRight, ArrowDownRight, Loader2
-} from "lucide-react";
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Almacen - Control Multi-Bodega & Acceso</title>
+  <!-- React & Babel Standalone CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0A0E12; display: flex; justify-content: center; padding: 20px; font-family: 'Inter', system-ui, sans-serif; }
+    #root { width: 100%; max-width: 1280px; }
+    input, select, button { font-family: inherit; }
+    input:focus, select:focus { outline: 2px solid #E8A63D; outline-offset: 1px; }
+    button:focus-visible { outline: 2px solid #E8A63D; }
+    ::placeholder { color: #6B7280; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
 
-const STORAGE_KEY = "negocio-data-v1";
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
 
-const emptyData = { products: [], sales: [], purchases: [], expenses: [] };
-
-const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-
-const todayStr = () => new Date().toISOString().slice(0, 10);
-
-const money = (n) =>
-  new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(
-    Math.round(Number(n) || 0)
-  );
-
-const dateFmt = (d) => {
-  try {
-    return new Date(d + "T00:00:00").toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return d;
-  }
-};
-
-const isThisMonth = (d) => {
-  const now = new Date();
-  const dd = new Date(d + "T00:00:00");
-  return dd.getFullYear() === now.getFullYear() && dd.getMonth() === now.getMonth();
-};
-
-const CATEGORY_OPTIONS_EXPENSE = ["Arriendo", "Servicios", "Sueldos", "Transporte", "Marketing", "Insumos", "Otro"];
-
-export default function App() {
-  const [data, setData] = useState(emptyData);
-  const [loaded, setLoaded] = useState(false);
-  const [saveState, setSaveState] = useState("idle");
-  const [tab, setTab] = useState("dashboard");
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get(STORAGE_KEY, false);
-        if (!cancelled && res && res.value) {
-          const parsed = JSON.parse(res.value);
-          setData({ ...emptyData, ...parsed });
+    const Icon = ({ name, size = 16, color = "currentColor", ...props }) => {
+      const iconRef = useRef(null);
+      useEffect(() => {
+        if (window.lucide && iconRef.current) {
+          window.lucide.createIcons();
         }
-      } catch (e) {
-        // no existing data yet, that's fine
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+      }, [name]);
+      return <i data-lucide={name} style={{ width: size, height: size, color, display: "inline-flex", verticalAlign: "middle" }} ref={iconRef} {...props}></i>;
+    };
 
-  const persist = useCallback(async (next) => {
-    setData(next);
-    setSaveState("saving");
-    try {
-      const res = await window.storage.set(STORAGE_KEY, JSON.stringify(next), false);
-      setSaveState(res ? "saved" : "error");
-      if (res) setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1500);
-    } catch (e) {
-      setSaveState("error");
-      setError("No se pudo guardar. Tus cambios se mantienen en esta sesión.");
-    }
-  }, []);
+    const AUTH_KEY = "negocio_active_user_v1";
+    const USERS_KEY = "negocio_users_list_v1";
+    const SALES_KEY = "negocio_sales_list_v1";
+    const PROD_KEY = "negocio_products_v1";
 
-  const productMap = useMemo(() => {
-    const m = {};
-    data.products.forEach((p) => (m[p.id] = p));
-    return m;
-  }, [data.products]);
-
-  // ---- derived metrics ----
-  const salesThisMonth = useMemo(() => data.sales.filter((s) => isThisMonth(s.date)), [data.sales]);
-  const expensesThisMonth = useMemo(() => data.expenses.filter((e) => isThisMonth(e.date)), [data.expenses]);
-  const purchasesThisMonth = useMemo(() => data.purchases.filter((p) => isThisMonth(p.date)), [data.purchases]);
-
-  const totalSalesMonth = salesThisMonth.reduce((a, s) => a + s.qty * s.unitPrice, 0);
-  const totalExpensesMonth = expensesThisMonth.reduce((a, e) => a + Number(e.amount), 0);
-  const totalPurchasesMonth = purchasesThisMonth.reduce((a, p) => a + p.qty * p.unitCost, 0);
-  const gananciaMonth = totalSalesMonth - totalExpensesMonth - totalPurchasesMonth;
-
-  const lowStock = useMemo(
-    () => data.products.filter((p) => Number(p.stock) <= Number(p.minStock ?? 0)),
-    [data.products]
-  );
-
-  const topSellers = useMemo(() => {
-    const totals = {};
-    data.sales.forEach((s) => {
-      totals[s.productId] = (totals[s.productId] || 0) + Number(s.qty);
-    });
-    return Object.entries(totals)
-      .map(([productId, qty]) => ({ productId, qty, product: productMap[productId] }))
-      .filter((x) => x.product)
-      .sort((a, b) => b.qty - a.qty)
-      .slice(0, 5);
-  }, [data.sales, productMap]);
-
-  const maxTopQty = topSellers.length ? topSellers[0].qty : 1;
-
-  const recentActivity = useMemo(() => {
-    const items = [
-      ...data.sales.map((s) => ({ type: "venta", date: s.date, ts: s.createdAt, label: productMap[s.productId]?.name || "Producto eliminado", detail: `${s.qty} u. · ${money(s.qty * s.unitPrice)}` })),
-      ...data.purchases.map((p) => ({ type: "compra", date: p.date, ts: p.createdAt, label: productMap[p.productId]?.name || "Producto eliminado", detail: `${p.qty} u. · ${money(p.qty * p.unitCost)}` })),
-      ...data.expenses.map((e) => ({ type: "gasto", date: e.date, ts: e.createdAt, label: e.category, detail: `${e.description || ""} · ${money(e.amount)}` })),
+    const initialUsers = [
+      { id: "u-admin", name: "Benjamín Parra", email: "admin@negocio.cl", pass: "123", role: "Administrador" },
+      { id: "u-bodega", name: "Rodrigo Almacén", email: "bodega@negocio.cl", pass: "123", role: "Bodeguero" },
+      { id: "u-ventas", name: "Camila Ventas", email: "ventas@negocio.cl", pass: "123", role: "Vendedor" }
     ];
-    return items.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 8);
-  }, [data, productMap]);
 
-  // ---- mutations ----
-  const addProduct = (p) => persist({ ...data, products: [...data.products, { ...p, id: uid(), createdAt: Date.now() }] });
-  const updateProduct = (id, patch) =>
-    persist({ ...data, products: data.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
-  const deleteProduct = (id) => persist({ ...data, products: data.products.filter((p) => p.id !== id) });
+    const defaultLocations = [
+      { id: "loc-central", name: "Bodega Central" },
+      { id: "loc-tienda", name: "Tienda Principal" }
+    ];
 
-  const addSale = (s) => {
-    const product = productMap[s.productId];
-    if (!product) return;
-    const nextProducts = data.products.map((p) =>
-      p.id === s.productId ? { ...p, stock: Number(p.stock) - Number(s.qty) } : p
-    );
-    persist({ ...data, products: nextProducts, sales: [...data.sales, { ...s, id: uid(), createdAt: Date.now() }] });
-  };
-  const deleteSale = (id) => {
-    const sale = data.sales.find((s) => s.id === id);
-    let nextProducts = data.products;
-    if (sale && productMap[sale.productId]) {
-      nextProducts = data.products.map((p) =>
-        p.id === sale.productId ? { ...p, stock: Number(p.stock) + Number(sale.qty) } : p
-      );
-    }
-    persist({ ...data, products: nextProducts, sales: data.sales.filter((s) => s.id !== id) });
-  };
+    const initialMockProducts = [
+      { id: "p1", name: "Polera Oversize Algodón", category: "Ropa", sku: "ROP-POL-101", barcode: "7801001", costPrice: 6500, salePrice: 14990, minStock: 5, stockByLocation: { "loc-central": 18, "loc-tienda": 4 } },
+      { id: "p2", name: "Taza Cerámica Negra", category: "Bazar", sku: "BAZ-TAZ-202", barcode: "7802002", costPrice: 2100, salePrice: 5990, minStock: 6, stockByLocation: { "loc-central": 3, "loc-tienda": 1 } },
+      { id: "p3", name: "Gorra Snapback Urbana", category: "Ropa", sku: "ROP-GOR-303", barcode: "7803003", costPrice: 4200, salePrice: 9990, minStock: 2, stockByLocation: { "loc-central": 12, "loc-tienda": 8 } }
+    ];
 
-  const addPurchase = (pu) => {
-    const product = productMap[pu.productId];
-    if (!product) return;
-    const nextProducts = data.products.map((p) =>
-      p.id === pu.productId ? { ...p, stock: Number(p.stock) + Number(pu.qty), costPrice: pu.unitCost } : p
-    );
-    persist({ ...data, products: nextProducts, purchases: [...data.purchases, { ...pu, id: uid(), createdAt: Date.now() }] });
-  };
-  const deletePurchase = (id) => {
-    const pur = data.purchases.find((p) => p.id === id);
-    let nextProducts = data.products;
-    if (pur && productMap[pur.productId]) {
-      nextProducts = data.products.map((p) =>
-        p.id === pur.productId ? { ...p, stock: Math.max(0, Number(p.stock) - Number(pur.qty)) } : p
-      );
-    }
-    persist({ ...data, products: nextProducts, purchases: data.purchases.filter((p) => p.id !== id) });
-  };
+    const initialMockSales = [
+      { id: "s1", date: new Date().toISOString().slice(0, 10), customerName: "Carlos Soto", paymentMethod: "Tarjeta Débito", total: 29980, details: "2x Polera Oversize Algodón" },
+      { id: "s2", date: new Date().toISOString().slice(0, 10), customerName: "Consumidor Final", paymentMethod: "Efectivo", total: 9990, details: "1x Gorra Snapback" }
+    ];
 
-  const addExpense = (e) => persist({ ...data, expenses: [...data.expenses, { ...e, id: uid(), createdAt: Date.now() }] });
-  const deleteExpense = (id) => persist({ ...data, expenses: data.expenses.filter((e) => e.id !== id) });
+    const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
+    const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
-  if (!loaded) {
-    return (
-      <div style={styles.loadingScreen}>
-        <style>{globalCss}</style>
-        <Loader2 className="spin" size={28} color="#E8A63D" />
-        <p style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#EDEAE1", marginTop: 12 }}>Abriendo el libro de negocio...</p>
-      </div>
-    );
-  }
+    function App() {
+      const [users, setUsers] = useState(() => {
+        const local = localStorage.getItem(USERS_KEY);
+        return local ? JSON.parse(local) : initialUsers;
+      });
 
-  return (
-    <div style={styles.app}>
-      <style>{globalCss}</style>
-      <Sidebar tab={tab} setTab={setTab} lowStockCount={lowStock.length} saveState={saveState} />
-      <main style={styles.main}>
-        {error && (
-          <div style={styles.errorBanner}>
-            <AlertTriangle size={16} />
-            <span>{error}</span>
-            <button onClick={() => setError(null)} style={styles.errorClose}><X size={14} /></button>
-          </div>
-        )}
-        {tab === "dashboard" && (
-          <Dashboard
-            totalSalesMonth={totalSalesMonth}
-            totalExpensesMonth={totalExpensesMonth}
-            totalPurchasesMonth={totalPurchasesMonth}
-            gananciaMonth={gananciaMonth}
-            lowStock={lowStock}
-            topSellers={topSellers}
-            maxTopQty={maxTopQty}
-            recentActivity={recentActivity}
-            productCount={data.products.length}
-          />
-        )}
-        {tab === "inventario" && (
-          <Inventario products={data.products} onAdd={addProduct} onUpdate={updateProduct} onDelete={deleteProduct} />
-        )}
-        {tab === "ventas" && (
-          <Ventas products={data.products} sales={data.sales} productMap={productMap} onAdd={addSale} onDelete={deleteSale} />
-        )}
-        {tab === "compras" && (
-          <Compras products={data.products} purchases={data.purchases} productMap={productMap} onAdd={addPurchase} onDelete={deletePurchase} />
-        )}
-        {tab === "gastos" && <Gastos expenses={data.expenses} onAdd={addExpense} onDelete={deleteExpense} />}
-      </main>
-    </div>
-  );
-}
+      const [currentUser, setCurrentUser] = useState(() => {
+        const active = localStorage.getItem(AUTH_KEY);
+        return active ? JSON.parse(active) : null;
+      });
 
-// ============================= SIDEBAR =============================
+      const [products, setProducts] = useState(() => {
+        const local = localStorage.getItem(PROD_KEY);
+        return local ? JSON.parse(local) : initialMockProducts;
+      });
 
-function Sidebar({ tab, setTab, lowStockCount, saveState }) {
-  const items = [
-    { id: "dashboard", label: "Panel", icon: LayoutDashboard },
-    { id: "inventario", label: "Inventario", icon: Package, badge: lowStockCount },
-    { id: "ventas", label: "Ventas", icon: ShoppingCart },
-    { id: "compras", label: "Compras", icon: Truck },
-    { id: "gastos", label: "Gastos", icon: Receipt },
-  ];
-  return (
-    <aside style={styles.sidebar}>
-      <div style={styles.brand}>
-        <div style={styles.brandMark}>MN</div>
-        <div>
-          <div style={styles.brandTitle}>Mi Negocio</div>
-          <div style={styles.brandSub}>Libro de control</div>
-        </div>
-      </div>
-      <nav style={styles.nav}>
-        {items.map((it) => {
-          const Icon = it.icon;
-          const active = tab === it.id;
-          return (
-            <button key={it.id} onClick={() => setTab(it.id)} style={{ ...styles.navItem, ...(active ? styles.navItemActive : {}) }}>
-              <Icon size={17} strokeWidth={2} />
-              <span>{it.label}</span>
-              {!!it.badge && <span style={styles.navBadge}>{it.badge}</span>}
-            </button>
-          );
-        })}
-      </nav>
-      <div style={styles.saveIndicator}>
-        <span style={{ ...styles.saveDot, background: saveState === "error" ? "#E1613D" : "#4FB3A9" }} />
-        {saveState === "saving" ? "Guardando..." : saveState === "error" ? "Sin guardar" : "Datos al día"}
-      </div>
-    </aside>
-  );
-}
+      const [sales, setSales] = useState(() => {
+        const local = localStorage.getItem(SALES_KEY);
+        return local ? JSON.parse(local) : initialMockSales;
+      });
 
-// ============================= DASHBOARD =============================
+      const [tab, setTab] = useState("dashboard");
+      const [locations] = useState(defaultLocations);
 
-function Dashboard({ totalSalesMonth, totalExpensesMonth, totalPurchasesMonth, gananciaMonth, lowStock, topSellers, maxTopQty, recentActivity, productCount }) {
-  return (
-    <div>
-      <PageHeader eyebrow="Este mes" title="Panel general" subtitle="Cómo va tu negocio de un vistazo." />
+      // Modal de edición / creación de ventas
+      const [saleModalState, setSaleModalState] = useState(null); // null | 'new' | saleObj
 
-      <div style={styles.kpiGrid}>
-        <KpiCard label="Ventas del mes" value={money(totalSalesMonth)} icon={TrendingUp} tone="teal" />
-        <KpiCard label="Compras del mes" value={money(totalPurchasesMonth)} icon={Truck} tone="amber" />
-        <KpiCard label="Gastos del mes" value={money(totalExpensesMonth)} icon={Receipt} tone="coral" />
-        <KpiCard
-          label="Ganancia estimada"
-          value={money(gananciaMonth)}
-          icon={gananciaMonth >= 0 ? ArrowUpRight : ArrowDownRight}
-          tone={gananciaMonth >= 0 ? "teal" : "coral"}
-        />
-      </div>
+      useEffect(() => {
+        localStorage.setItem(USERS_KEY, JSON.stringify(users));
+      }, [users]);
 
-      <div style={styles.dashGrid}>
-        <section style={styles.panel}>
-          <h3 style={styles.panelTitle}><Star size={15} color="#E8A63D" fill="#E8A63D" /> Productos más vendidos</h3>
-          {topSellers.length === 0 ? (
-            <EmptyNote text="Aún no hay ventas registradas. Cuando registres una venta, aparecerá aquí." />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 14 }}>
-              {topSellers.map((t, i) => (
-                <div key={t.productId}>
-                  <div style={styles.barRow}>
-                    <span style={styles.barRank}>{i + 1}</span>
-                    <span style={styles.barLabel}>{t.product.name}</span>
-                    <span style={styles.barQty}>{t.qty} u.</span>
-                  </div>
-                  <div style={styles.barTrack}>
-                    <div style={{ ...styles.barFill, width: `${(t.qty / maxTopQty) * 100}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+      useEffect(() => {
+        localStorage.setItem(SALES_KEY, JSON.stringify(sales));
+      }, [sales]);
 
-        <section style={styles.panel}>
-          <h3 style={styles.panelTitle}><AlertTriangle size={15} color="#E1613D" /> Stock bajo</h3>
-          {lowStock.length === 0 ? (
-            <EmptyNote text={productCount === 0 ? "Registra tu primer producto en Inventario." : "Todo tu stock está por sobre el mínimo. Bien ahí."} />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-              {lowStock.map((p) => (
-                <div key={p.id} style={styles.lowStockRow}>
-                  <span>{p.name}</span>
-                  <span style={styles.lowStockQty}>{p.stock} / mín. {p.minStock ?? 0}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
+      useEffect(() => {
+        localStorage.setItem(PROD_KEY, JSON.stringify(products));
+      }, [products]);
 
-      <section style={{ ...styles.panel, marginTop: 20 }}>
-        <h3 style={styles.panelTitle}>Actividad reciente</h3>
-        {recentActivity.length === 0 ? (
-          <EmptyNote text="Todavía no hay movimientos. Registra una venta, compra o gasto para verlo aquí." />
-        ) : (
-          <div style={{ marginTop: 10 }}>
-            {recentActivity.map((a, i) => (
-              <div key={i} style={styles.activityRow}>
-                <span style={{ ...styles.activityTag, ...activityTagStyle(a.type) }}>{a.type}</span>
-                <span style={styles.activityLabel}>{a.label}</span>
-                <span style={styles.activityDetail}>{a.detail}</span>
-                <span style={styles.activityDate}>{dateFmt(a.date)}</span>
+      useEffect(() => {
+        if (currentUser) {
+          localStorage.setItem(AUTH_KEY, JSON.stringify(currentUser));
+        } else {
+          localStorage.removeItem(AUTH_KEY);
+        }
+        if (window.lucide) window.lucide.createIcons();
+      }, [currentUser, tab, sales]);
+
+      const handleLogin = (userObj) => {
+        setCurrentUser(userObj);
+        setTab("dashboard");
+      };
+
+      const handleLogout = () => {
+        setCurrentUser(null);
+      };
+
+      const handleRegister = (newUser) => {
+        setUsers(prev => [...prev, newUser]);
+        setCurrentUser(newUser);
+      };
+
+      // Operaciones de Ventas (CRUD)
+      const handleSaveSale = (saleData) => {
+        if (saleModalState === "new") {
+          const newEntry = { ...saleData, id: "s-" + Date.now() };
+          setSales(prev => [newEntry, ...prev]);
+        } else {
+          setSales(prev => prev.map(s => s.id === saleModalState.id ? { ...saleData, id: s.id } : s));
+        }
+        setSaleModalState(null);
+      };
+
+      const handleDeleteSale = (saleId) => {
+        if (confirm("¿Estás seguro de eliminar esta venta del registro?")) {
+          setSales(prev => prev.filter(s => s.id !== saleId));
+        }
+      };
+
+      if (!currentUser) {
+        return <AuthScreen onLogin={handleLogin} onRegister={handleRegister} users={users} />;
+      }
+
+      const role = currentUser.role || "Vendedor";
+      const canAccessFinances = role === "Administrador";
+      const canAccessWarehouses = role === "Administrador" || role === "Bodeguero";
+      const canAccessSales = role === "Administrador" || role === "Vendedor";
+
+      const lowStock = products.filter(p => getProductTotalStock(p) <= (p.minStock || 0));
+      const totalSales = sales.reduce((a, s) => a + Number(s.total || 0), 0);
+
+      return (
+        <div style={styles.app}>
+          <aside style={styles.sidebar}>
+            <div style={styles.brand}>
+              <div style={styles.brandMark}>PRO</div>
+              <div>
+                <div style={styles.brandTitle}>Almacén PRO</div>
+                <div style={styles.brandSub}>Control Multi-Bodega</div>
               </div>
-            ))}
+            </div>
+
+            <div style={styles.userCard}>
+              <div style={styles.userAvatar}>
+                {currentUser.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={styles.userName}>{currentUser.name}</div>
+                <span style={styles.roleBadge}>{currentUser.role}</span>
+              </div>
+              <button style={styles.logoutBtn} onClick={handleLogout} title="Cerrar sesión">
+                <Icon name="log-out" size={14} color="#F0987B" />
+              </button>
+            </div>
+
+            <nav style={styles.nav}>
+              <button onClick={() => setTab("dashboard")} style={{ ...styles.navItem, ...(tab === "dashboard" ? styles.navItemActive : {}) }}>
+                <Icon name="layout-dashboard" size={16} />
+                <span>Panel</span>
+              </button>
+
+              <button onClick={() => setTab("inventario")} style={{ ...styles.navItem, ...(tab === "inventario" ? styles.navItemActive : {}) }}>
+                <Icon name="package" size={16} />
+                <span>Inventario</span>
+                {lowStock.length > 0 && <span style={styles.navBadge}>{lowStock.length}</span>}
+              </button>
+
+              {canAccessWarehouses && (
+                <button onClick={() => setTab("bodegas")} style={{ ...styles.navItem, ...(tab === "bodegas" ? styles.navItemActive : {}) }}>
+                  <Icon name="warehouse" size={16} />
+                  <span>Bodegas & Traspaso</span>
+                </button>
+              )}
+
+              {canAccessSales && (
+                <button onClick={() => setTab("ventas")} style={{ ...styles.navItem, ...(tab === "ventas" ? styles.navItemActive : {}) }}>
+                  <Icon name="shopping-cart" size={16} />
+                  <span>Ventas & Caja</span>
+                </button>
+              )}
+
+              {canAccessFinances && (
+                <button onClick={() => setTab("usuarios")} style={{ ...styles.navItem, ...(tab === "usuarios" ? styles.navItemActive : {}) }}>
+                  <Icon name="users" size={16} />
+                  <span>Equipo & Accesos</span>
+                </button>
+              )}
+            </nav>
+
+            <div style={styles.footerStatus}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4FB3A9" }}></span>
+              <span>Conectado: {currentUser.email}</span>
+            </div>
+          </aside>
+
+          <main style={styles.main}>
+            {tab === "dashboard" && (
+              <div>
+                <div style={styles.pageHeader}>
+                  <div>
+                    <div style={styles.eyebrow}>RESUMEN GENERAL</div>
+                    <h2 style={styles.pageTitle}>Bienvenido, {currentUser.name}</h2>
+                  </div>
+                  {canAccessSales && (
+                    <button style={styles.primaryBtn} onClick={() => setSaleModalState("new")}>
+                      <Icon name="plus" size={14} /> Registrar Venta
+                    </button>
+                  )}
+                </div>
+
+                <div style={styles.kpiGrid}>
+                  <div style={styles.kpiCard}>
+                    <span style={styles.kpiLabel}>Ventas Registradas</span>
+                    <div style={{ ...styles.kpiValue, color: "#7FD9C4" }}>{money(totalSales)}</div>
+                  </div>
+                  <div style={styles.kpiCard}>
+                    <span style={styles.kpiLabel}>Productos en Catálogo</span>
+                    <div style={{ ...styles.kpiValue, color: "#E8A63D" }}>{products.length} artículos</div>
+                  </div>
+                  <div style={styles.kpiCard}>
+                    <span style={styles.kpiLabel}>Stock Crítico</span>
+                    <div style={{ ...styles.kpiValue, color: lowStock.length > 0 ? "#F0987B" : "#7FD9C4" }}>{lowStock.length} items</div>
+                  </div>
+                </div>
+
+                <div style={styles.dashGrid}>
+                  <div style={styles.panel}>
+                    <h3 style={styles.panelTitle}>Alertas de Reposición</h3>
+                    {lowStock.length === 0 ? (
+                      <p style={{ color: "#6B7480", fontSize: 13 }}>Todo el stock se encuentra en niveles óptimos.</p>
+                    ) : (
+                      lowStock.map(p => (
+                        <div key={p.id} style={styles.lowStockRow}>
+                          <span>{p.name}</span>
+                          <span style={{ color: "#F0987B" }}>{getProductTotalStock(p)} / mín. {p.minStock} un.</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div style={styles.panel}>
+                    <h3 style={styles.panelTitle}>Bodegas Operativas</h3>
+                    {locations.map(l => (
+                      <div key={l.id} style={styles.lowStockRow}>
+                        <span>{l.name}</span>
+                        <span style={{ color: "#7FD9C4" }}>Activa</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === "inventario" && (
+              <div>
+                <div style={styles.pageHeader}>
+                  <div>
+                    <div style={styles.eyebrow}>INVENTARIO GLOBAL</div>
+                    <h2 style={styles.pageTitle}>Catálogo y Fichas de Bodega</h2>
+                  </div>
+                </div>
+                <div style={styles.tagGrid}>
+                  {products.map(p => (
+                    <div key={p.id} style={styles.tag}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 10, color: "#8A7A4E", fontWeight: 700, textTransform: "uppercase" }}>{p.category}</span>
+                        {getProductTotalStock(p) <= p.minStock && <span style={{ background: "#F0997B", color: "#4A1B0C", fontSize: 10, padding: "2px 5px", borderRadius: 4, fontWeight: 700 }}>Stock Bajo</span>}
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 700, margin: "6px 0 2px" }}>{p.name}</div>
+                      <div style={{ fontSize: 11, color: "#8A7A4E", fontFamily: "monospace" }}>SKU: {p.sku}</div>
+                      <div style={{ borderTop: "1px dashed #C9C2AC", margin: "8px 0" }}></div>
+                      <div style={styles.tagRow}><span>Precio Venta:</span><strong>{money(p.salePrice)}</strong></div>
+                      <div style={styles.tagRow}><span>Costo Unit.:</span><span>{money(p.costPrice)}</span></div>
+                      <div style={styles.tagRow}><span>Stock Total:</span><strong style={{ color: "#1E3A34" }}>{getProductTotalStock(p)} un.</strong></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tab === "bodegas" && canAccessWarehouses && (
+              <div>
+                <div style={styles.pageHeader}>
+                  <div>
+                    <div style={styles.eyebrow}>LOGÍSTICA</div>
+                    <h2 style={styles.pageTitle}>Distribución de Stock por Almacén</h2>
+                  </div>
+                </div>
+                <div style={styles.dashGrid}>
+                  {locations.map(loc => (
+                    <div key={loc.id} style={styles.panel}>
+                      <h3 style={{ color: "#E8A63D", margin: "0 0 12px 0", fontSize: 16 }}>{loc.name}</h3>
+                      {products.map(p => (
+                        <div key={p.id} style={styles.lowStockRow}>
+                          <span>{p.name}</span>
+                          <strong style={{ color: "#EDEAE1" }}>{p.stockByLocation?.[loc.id] || 0} un.</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tab === "ventas" && canAccessSales && (
+              <div>
+                <div style={styles.pageHeader}>
+                  <div>
+                    <div style={styles.eyebrow}>PUNTO DE VENTA</div>
+                    <h2 style={styles.pageTitle}>Registro y Modificación de Ventas</h2>
+                  </div>
+                  <button style={styles.primaryBtn} onClick={() => setSaleModalState("new")}>
+                    <Icon name="plus" size={14} /> Registrar Venta
+                  </button>
+                </div>
+                <div style={styles.panel}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", color: "#EDEAE1", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ color: "#8B93A0", textAlign: "left", borderBottom: "1px solid #232C37" }}>
+                        <th style={{ padding: 10 }}>Fecha</th>
+                        <th>Cliente</th>
+                        <th>Detalle / Concepto</th>
+                        <th>Medio de Pago</th>
+                        <th>Total</th>
+                        <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sales.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" style={{ padding: 16, textAlign: "center", color: "#6B7480" }}>
+                            No hay ventas registradas. Haz clic en "Registrar Venta".
+                          </td>
+                        </tr>
+                      ) : (
+                        sales.map(s => (
+                          <tr key={s.id} style={{ borderBottom: "1px solid #232C37" }}>
+                            <td style={{ padding: 10 }}>{s.date}</td>
+                            <td style={{ fontWeight: 600 }}>{s.customerName}</td>
+                            <td style={{ color: "#8B93A0" }}>{s.details || "Venta general"}</td>
+                            <td><span style={styles.badgeGray}>{s.paymentMethod}</span></td>
+                            <td style={{ color: "#7FD9C4", fontWeight: 700 }}>{money(s.total)}</td>
+                            <td style={{ textAlign: "right", paddingRight: 10 }}>
+                              <button
+                                style={styles.actionIconBtn}
+                                onClick={() => setSaleModalState(s)}
+                                title="Modificar venta"
+                              >
+                                <Icon name="pencil" size={14} color="#E8A63D" />
+                              </button>
+                              <button
+                                style={styles.actionIconBtn}
+                                onClick={() => handleDeleteSale(s.id)}
+                                title="Eliminar venta"
+                              >
+                                <Icon name="trash-2" size={14} color="#F0987B" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {tab === "usuarios" && canAccessFinances && (
+              <UsersManager users={users} onAddUser={(u) => setUsers(prev => [...prev, u])} />
+            )}
+          </main>
+
+          {/* Modal para Modificar / Crear Venta */}
+          {saleModalState && (
+            <SaleModal
+              sale={saleModalState === "new" ? null : saleModalState}
+              onClose={() => setSaleModalState(null)}
+              onSave={handleSaveSale}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // Modal de Modificación / Creación de Ventas
+    function SaleModal({ sale, onClose, onSave }) {
+      const [customerName, setCustomerName] = useState(sale?.customerName || "");
+      const [details, setDetails] = useState(sale?.details || "");
+      const [paymentMethod, setPaymentMethod] = useState(sale?.paymentMethod || "Efectivo");
+      const [total, setTotal] = useState(sale?.total || 0);
+      const [date, setDate] = useState(sale?.date || new Date().toISOString().slice(0, 10));
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!customerName.trim() || Number(total) <= 0) return;
+        onSave({
+          customerName: customerName.trim(),
+          details: details.trim(),
+          paymentMethod,
+          total: Number(total),
+          date
+        });
+      };
+
+      return (
+        <div style={styles.overlay} onClick={onClose}>
+          <div style={styles.modal} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 14px", color: "#EDEAE1" }}>
+              {sale ? "Modificar Venta" : "Registrar Nueva Venta"}
+            </h3>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={styles.inputLabel}>Cliente</label>
+                <input
+                  style={styles.input}
+                  value={customerName}
+                  onChange={e => setCustomerName(e.target.value)}
+                  placeholder="Ej: Carlos Soto / Consumidor Final"
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={styles.inputLabel}>Detalle o Concepto</label>
+                <input
+                  style={styles.input}
+                  value={details}
+                  onChange={e => setDetails(e.target.value)}
+                  placeholder="Ej: 2x Poleras, 1x Gorra"
+                />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={styles.inputLabel}>Medio de Pago</label>
+                  <select style={styles.input} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Tarjeta Débito">Tarjeta Débito</option>
+                    <option value="Tarjeta Crédito">Tarjeta Crédito</option>
+                    <option value="Transferencia">Transferencia</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={styles.inputLabel}>Total Venta ($)</label>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    min="1"
+                    value={total}
+                    onChange={e => setTotal(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={styles.inputLabel}>Fecha</label>
+                <input
+                  style={styles.input}
+                  type="date"
+                  value={date}
+                  onChange={e => setDate(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+                <button type="submit" style={styles.primaryBtn}>
+                  {sale ? "Guardar Cambios" : "Guardar Venta"}
+                </button>
+              </div>
+            </form>
           </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function activityTagStyle(type) {
-  if (type === "venta") return { background: "#1E3A34", color: "#7FD9C4" };
-  if (type === "compra") return { background: "#3A2E17", color: "#E8A63D" };
-  return { background: "#3A1F17", color: "#F0987B" };
-}
-
-function KpiCard({ label, value, icon: Icon, tone }) {
-  const toneColor = { teal: "#4FB3A9", amber: "#E8A63D", coral: "#E1613D" }[tone] || "#4FB3A9";
-  return (
-    <div style={styles.kpiCard}>
-      <div style={styles.kpiTop}>
-        <span style={styles.kpiLabel}>{label}</span>
-        <Icon size={16} color={toneColor} />
-      </div>
-      <div style={styles.kpiValue}>{value}</div>
-    </div>
-  );
-}
-
-function EmptyNote({ text }) {
-  return <p style={styles.emptyNote}>{text}</p>;
-}
-
-function PageHeader({ eyebrow, title, subtitle, action }) {
-  return (
-    <div style={styles.pageHeader}>
-      <div>
-        <div style={styles.eyebrow}>{eyebrow}</div>
-        <h2 style={styles.pageTitle}>{title}</h2>
-        {subtitle && <p style={styles.pageSubtitle}>{subtitle}</p>}
-      </div>
-      {action}
-    </div>
-  );
-}
-
-// ============================= INVENTARIO =============================
-
-function Inventario({ products, onAdd, onUpdate, onDelete }) {
-  const [query, setQuery] = useState("");
-  const [modal, setModal] = useState(null); // null | 'new' | product object
-
-  const filtered = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || (p.sku || "").toLowerCase().includes(query.toLowerCase()));
-
-  return (
-    <div>
-      <PageHeader
-        eyebrow="Inventario"
-        title="Tus productos"
-        subtitle="Cada ficha es una etiqueta de bodega: precio, costo y stock al tiro."
-        action={<button style={styles.primaryBtn} onClick={() => setModal("new")}><Plus size={16} /> Nuevo producto</button>}
-      />
-
-      <div style={styles.searchWrap}>
-        <Search size={15} color="#8B93A0" />
-        <input style={styles.searchInput} placeholder="Buscar por nombre o SKU..." value={query} onChange={(e) => setQuery(e.target.value)} />
-      </div>
-
-      {filtered.length === 0 ? (
-        <EmptyNote text={products.length === 0 ? "No tienes productos todavía. Crea el primero con “Nuevo producto”." : "Nada coincide con esa búsqueda."} />
-      ) : (
-        <div style={styles.tagGrid}>
-          {filtered.map((p) => (
-            <ProductTag key={p.id} product={p} onEdit={() => setModal(p)} onDelete={() => onDelete(p.id)} />
-          ))}
         </div>
-      )}
+      );
+    }
 
-      {modal && (
-        <ProductModal
-          initial={modal === "new" ? null : modal}
-          onClose={() => setModal(null)}
-          onSave={(payload) => {
-            if (modal === "new") onAdd(payload);
-            else onUpdate(modal.id, payload);
-            setModal(null);
-          }}
-        />
-      )}
-    </div>
-  );
-}
+    function AuthScreen({ onLogin, onRegister, users }) {
+      const [isRegister, setIsRegister] = useState(false);
+      const [email, setEmail] = useState("admin@negocio.cl");
+      const [pass, setPass] = useState("123");
+      const [name, setName] = useState("");
+      const [role, setRole] = useState("Vendedor");
+      const [error, setError] = useState("");
 
-function ProductTag({ product, onEdit, onDelete }) {
-  const low = Number(product.stock) <= Number(product.minStock ?? 0);
-  return (
-    <div style={styles.tag}>
-      <div style={styles.tagNotches}>
-        {Array.from({ length: 8 }).map((_, i) => (
-          <span key={i} style={styles.tagNotch} />
-        ))}
-      </div>
-      <div style={styles.tagBody}>
-        <div style={styles.tagHeadRow}>
-          <span style={styles.tagCategory}>{product.category || "General"}</span>
-          {low && <span style={styles.tagLowBadge}><AlertTriangle size={11} /> bajo</span>}
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        setError("");
+
+        if (isRegister) {
+          if (!name.trim() || !email.trim() || !pass.trim()) {
+            setError("Todos los campos son obligatorios.");
+            return;
+          }
+          if (users.some(u => u.email.toLowerCase() === email.trim().toLowerCase())) {
+            setError("Ya existe un usuario registrado con este correo.");
+            return;
+          }
+          const newUser = { id: "u-" + Date.now(), name: name.trim(), email: email.trim(), pass, role };
+          onRegister(newUser);
+        } else {
+          const userFound = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase() && u.pass === pass);
+          if (userFound) {
+            onLogin(userFound);
+          } else {
+            setError("Credenciales incorrectas. Verifica correo y contraseña.");
+          }
+        }
+      };
+
+      const setDemo = (userEmail) => {
+        const u = users.find(x => x.email === userEmail);
+        if (u) {
+          setEmail(u.email);
+          setPass(u.pass);
+        }
+      };
+
+      return (
+        <div style={styles.authContainer}>
+          <div style={styles.authCard}>
+            <div style={{ textAlign: "center", marginBottom: 22 }}>
+              <div style={styles.authLogo}>PRO</div>
+              <h2 style={{ color: "#EDEAE1", margin: "10px 0 4px", fontSize: 22 }}>Almacén PRO</h2>
+              <p style={{ color: "#8B93A0", fontSize: 13, margin: 0 }}>Control Multi-Bodega & Gestión Comercial</p>
+            </div>
+
+            <div style={styles.authTabs}>
+              <button
+                type="button"
+                style={{ ...styles.authTabBtn, ...(isRegister ? {} : styles.authTabActive) }}
+                onClick={() => { setIsRegister(false); setError(""); }}
+              >
+                Iniciar Sesión
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.authTabBtn, ...(isRegister ? styles.authTabActive : {}) }}
+                onClick={() => { setIsRegister(true); setError(""); }}
+              >
+                Crear Cuenta
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {isRegister && (
+                <div>
+                  <label style={styles.inputLabel}>Nombre completo</label>
+                  <input
+                    style={styles.input}
+                    placeholder="Ej: Juan Pérez"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+
+              <div>
+                <label style={styles.inputLabel}>Correo electrónico</label>
+                <input
+                  style={styles.input}
+                  type="email"
+                  placeholder="usuario@negocio.cl"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={styles.inputLabel}>Contraseña</label>
+                <input
+                  style={styles.input}
+                  type="password"
+                  placeholder="••••••••"
+                  value={pass}
+                  onChange={(e) => setPass(e.target.value)}
+                  required
+                />
+              </div>
+
+              {isRegister && (
+                <div>
+                  <label style={styles.inputLabel}>Rol en el negocio</label>
+                  <select style={styles.input} value={role} onChange={(e) => setRole(e.target.value)}>
+                    <option value="Administrador">Administrador (Acceso total)</option>
+                    <option value="Bodeguero">Bodeguero (Inventario y transferencias)</option>
+                    <option value="Vendedor">Vendedor (Punto de venta y catálogo)</option>
+                  </select>
+                </div>
+              )}
+
+              {error && <div style={styles.errorMsg}>{error}</div>}
+
+              <button type="submit" style={styles.submitBtn}>
+                {isRegister ? "Registrar e Ingresar" : "Entrar al Sistema"}
+              </button>
+            </form>
+
+            {!isRegister && (
+              <div style={styles.demoSection}>
+                <span style={{ fontSize: 11, color: "#8B93A0" }}>Ingreso rápido de prueba:</span>
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("admin@negocio.cl")}>Admin</button>
+                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("bodega@negocio.cl")}>Bodega</button>
+                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("ventas@negocio.cl")}>Ventas</button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-        <div style={styles.tagName}>{product.name}</div>
-        <div style={styles.tagSku}>SKU {product.sku || "—"}</div>
-        <div style={styles.tagDivider} />
-        <div style={styles.tagRow}>
-          <span>Precio venta</span>
-          <strong>{money(product.salePrice)}</strong>
-        </div>
-        <div style={styles.tagRow}>
-          <span>Costo</span>
-          <strong>{money(product.costPrice)}</strong>
-        </div>
-        <div style={styles.tagRow}>
-          <span>Stock</span>
-          <strong style={low ? { color: "#F0987B" } : undefined}>{product.stock} u.</strong>
-        </div>
-        <div style={styles.tagActions}>
-          <button style={styles.tagBtn} onClick={onEdit}><Pencil size={13} /> Editar</button>
-          <button style={{ ...styles.tagBtn, color: "#E1613D" }} onClick={onDelete}><Trash2 size={13} /> Eliminar</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+      );
+    }
 
-function ProductModal({ initial, onClose, onSave }) {
-  const [form, setForm] = useState(
-    initial || { name: "", category: "", sku: "", stock: 0, minStock: 0, costPrice: 0, salePrice: 0 }
-  );
-  const [err, setErr] = useState("");
+    function UsersManager({ users, onAddUser }) {
+      const [modal, setModal] = useState(false);
+      const [name, setName] = useState("");
+      const [email, setEmail] = useState("");
+      const [pass, setPass] = useState("");
+      const [role, setRole] = useState("Vendedor");
 
-  const submit = () => {
-    if (!form.name.trim()) { setErr("Ponle un nombre al producto."); return; }
-    if (Number(form.salePrice) < 0 || Number(form.costPrice) < 0 || Number(form.stock) < 0) { setErr("Los montos no pueden ser negativos."); return; }
-    onSave({
-      ...form,
-      stock: Number(form.stock),
-      minStock: Number(form.minStock),
-      costPrice: Number(form.costPrice),
-      salePrice: Number(form.salePrice),
-    });
-  };
+      const handleCreate = (e) => {
+        e.preventDefault();
+        if (!name || !email || !pass) return;
+        onAddUser({ id: "u-" + Date.now(), name, email, pass, role });
+        setName(""); setEmail(""); setPass(""); setModal(false);
+      };
 
-  return (
-    <Modal title={initial ? "Editar producto" : "Nuevo producto"} onClose={onClose}>
-      <FormRow label="Nombre">
-        <input style={styles.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ej: Polera algodón" />
-      </FormRow>
-      <div style={styles.formTwoCol}>
-        <FormRow label="Categoría">
-          <input style={styles.input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Ej: Ropa" />
-        </FormRow>
-        <FormRow label="SKU">
-          <input style={styles.input} value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="Ej: POL-001" />
-        </FormRow>
-      </div>
-      <div style={styles.formTwoCol}>
-        <FormRow label="Precio de costo">
-          <input style={styles.input} type="number" min="0" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: e.target.value })} />
-        </FormRow>
-        <FormRow label="Precio de venta">
-          <input style={styles.input} type="number" min="0" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: e.target.value })} />
-        </FormRow>
-      </div>
-      <div style={styles.formTwoCol}>
-        <FormRow label="Stock actual">
-          <input style={styles.input} type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
-        </FormRow>
-        <FormRow label="Stock mínimo (alerta)">
-          <input style={styles.input} type="number" min="0" value={form.minStock} onChange={(e) => setForm({ ...form, minStock: e.target.value })} />
-        </FormRow>
-      </div>
-      {err && <p style={styles.formError}>{err}</p>}
-      <div style={styles.modalActions}>
-        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-        <button style={styles.primaryBtn} onClick={submit}>Guardar producto</button>
-      </div>
-    </Modal>
-  );
-}
+      return (
+        <div>
+          <div style={styles.pageHeader}>
+            <div>
+              <div style={styles.eyebrow}>ADMINISTRACIÓN</div>
+              <h2 style={styles.pageTitle}>Cuentas y Accesos de Personal</h2>
+            </div>
+            <button style={styles.primaryBtn} onClick={() => setModal(true)}>+ Agregar Miembro</button>
+          </div>
 
-// ============================= VENTAS =============================
+          <div style={styles.panel}>
+            <table style={{ width: "100%", borderCollapse: "collapse", color: "#EDEAE1", fontSize: 13 }}>
+              <thead>
+                <tr style={{ color: "#8B93A0", textAlign: "left", borderBottom: "1px solid #232C37" }}>
+                  <th style={{ padding: 10 }}>Nombre</th>
+                  <th>Correo</th>
+                  <th>Rol asignado</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.id} style={{ borderBottom: "1px solid #232C37" }}>
+                    <td style={{ padding: 10, fontWeight: 600 }}>{u.name}</td>
+                    <td style={{ color: "#8B93A0" }}>{u.email}</td>
+                    <td><span style={styles.badgeOrange}>{u.role}</span></td>
+                    <td><span style={{ color: "#7FD9C4", fontSize: 12 }}>● Activo</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-function Ventas({ products, sales, productMap, onAdd, onDelete }) {
-  const [modal, setModal] = useState(false);
-  const sorted = [...sales].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-  return (
-    <div>
-      <PageHeader
-        eyebrow="Ventas"
-        title="Registro de ventas"
-        subtitle="Cada venta descuenta stock automáticamente."
-        action={<button style={styles.primaryBtn} onClick={() => setModal(true)} disabled={products.length === 0}><Plus size={16} /> Nueva venta</button>}
-      />
-      {products.length === 0 && <EmptyNote text="Primero crea productos en Inventario para poder venderlos." />}
-      {sorted.length === 0 && products.length > 0 ? (
-        <EmptyNote text="No has registrado ventas todavía." />
-      ) : (
-        <MovementTable
-          rows={sorted}
-          columns={["Fecha", "Producto", "Cantidad", "Precio unit.", "Total", ""]}
-          renderRow={(s) => (
-            <>
-              <td>{dateFmt(s.date)}</td>
-              <td>{productMap[s.productId]?.name || "Producto eliminado"}</td>
-              <td>{s.qty}</td>
-              <td>{money(s.unitPrice)}</td>
-              <td style={{ color: "#7FD9C4", fontWeight: 600 }}>{money(s.qty * s.unitPrice)}</td>
-              <td><button style={styles.rowDeleteBtn} onClick={() => onDelete(s.id)}><Trash2 size={13} /></button></td>
-            </>
+          {modal && (
+            <div style={styles.overlay} onClick={() => setModal(false)}>
+              <div style={styles.modal} onClick={e => e.stopPropagation()}>
+                <h3 style={{ margin: "0 0 14px", color: "#EDEAE1" }}>Crear Cuenta de Personal</h3>
+                <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <label style={styles.inputLabel}>Nombre</label>
+                    <input style={styles.input} value={name} onChange={e => setName(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label style={styles.inputLabel}>Correo</label>
+                    <input style={styles.input} type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label style={styles.inputLabel}>Contraseña provisional</label>
+                    <input style={styles.input} type="password" value={pass} onChange={e => setPass(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label style={styles.inputLabel}>Rol de acceso</label>
+                    <select style={styles.input} value={role} onChange={e => setRole(e.target.value)}>
+                      <option value="Administrador">Administrador</option>
+                      <option value="Bodeguero">Bodeguero</option>
+                      <option value="Vendedor">Vendedor</option>
+                    </select>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                    <button type="button" style={styles.secondaryBtn} onClick={() => setModal(false)}>Cancelar</button>
+                    <button type="submit" style={styles.primaryBtn}>Crear Usuario</button>
+                  </div>
+                </form>
+              </div>
+            </div>
           )}
-        />
-      )}
-      {modal && (
-        <SaleModal
-          products={products}
-          onClose={() => setModal(false)}
-          onSave={(payload) => { onAdd(payload); setModal(false); }}
-        />
-      )}
-    </div>
-  );
-}
-
-function SaleModal({ products, onClose, onSave }) {
-  const [productId, setProductId] = useState(products[0]?.id || "");
-  const [qty, setQty] = useState(1);
-  const [unitPrice, setUnitPrice] = useState(products[0]?.salePrice || 0);
-  const [date, setDate] = useState(todayStr());
-  const [err, setErr] = useState("");
-
-  const selected = products.find((p) => p.id === productId);
-
-  useEffect(() => {
-    if (selected) setUnitPrice(selected.salePrice);
-  }, [productId]);
-
-  const submit = () => {
-    if (!selected) { setErr("Selecciona un producto."); return; }
-    if (Number(qty) <= 0) { setErr("La cantidad debe ser mayor a 0."); return; }
-    if (Number(qty) > Number(selected.stock)) { setErr(`Solo hay ${selected.stock} unidades en stock.`); return; }
-    onSave({ productId, qty: Number(qty), unitPrice: Number(unitPrice), date });
-  };
-
-  return (
-    <Modal title="Registrar venta" onClose={onClose}>
-      <FormRow label="Producto">
-        <select style={styles.input} value={productId} onChange={(e) => setProductId(e.target.value)}>
-          {products.map((p) => (
-            <option key={p.id} value={p.id}>{p.name} · stock {p.stock}</option>
-          ))}
-        </select>
-      </FormRow>
-      <div style={styles.formTwoCol}>
-        <FormRow label="Cantidad">
-          <input style={styles.input} type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} />
-        </FormRow>
-        <FormRow label="Precio unitario">
-          <input style={styles.input} type="number" min="0" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
-        </FormRow>
-      </div>
-      <FormRow label="Fecha">
-        <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </FormRow>
-      <p style={styles.totalPreview}>Total: <strong>{money(Number(qty) * Number(unitPrice))}</strong></p>
-      {err && <p style={styles.formError}>{err}</p>}
-      <div style={styles.modalActions}>
-        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-        <button style={styles.primaryBtn} onClick={submit}>Registrar venta</button>
-      </div>
-    </Modal>
-  );
-}
-
-// ============================= COMPRAS =============================
-
-function Compras({ products, purchases, productMap, onAdd, onDelete }) {
-  const [modal, setModal] = useState(false);
-  const sorted = [...purchases].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-  return (
-    <div>
-      <PageHeader
-        eyebrow="Compras"
-        title="Registro de compras"
-        subtitle="Cada compra suma stock y actualiza el costo del producto."
-        action={<button style={styles.primaryBtn} onClick={() => setModal(true)} disabled={products.length === 0}><Plus size={16} /> Nueva compra</button>}
-      />
-      {products.length === 0 && <EmptyNote text="Primero crea productos en Inventario para poder comprarlos." />}
-      {sorted.length === 0 && products.length > 0 ? (
-        <EmptyNote text="No has registrado compras todavía." />
-      ) : (
-        <MovementTable
-          rows={sorted}
-          columns={["Fecha", "Producto", "Proveedor", "Cantidad", "Costo unit.", "Total", ""]}
-          renderRow={(p) => (
-            <>
-              <td>{dateFmt(p.date)}</td>
-              <td>{productMap[p.productId]?.name || "Producto eliminado"}</td>
-              <td>{p.vendor || "—"}</td>
-              <td>{p.qty}</td>
-              <td>{money(p.unitCost)}</td>
-              <td style={{ color: "#E8A63D", fontWeight: 600 }}>{money(p.qty * p.unitCost)}</td>
-              <td><button style={styles.rowDeleteBtn} onClick={() => onDelete(p.id)}><Trash2 size={13} /></button></td>
-            </>
-          )}
-        />
-      )}
-      {modal && (
-        <PurchaseModal
-          products={products}
-          onClose={() => setModal(false)}
-          onSave={(payload) => { onAdd(payload); setModal(false); }}
-        />
-      )}
-    </div>
-  );
-}
-
-function PurchaseModal({ products, onClose, onSave }) {
-  const [productId, setProductId] = useState(products[0]?.id || "");
-  const [qty, setQty] = useState(1);
-  const [unitCost, setUnitCost] = useState(products[0]?.costPrice || 0);
-  const [vendor, setVendor] = useState("");
-  const [date, setDate] = useState(todayStr());
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    const p = products.find((x) => x.id === productId);
-    if (p) setUnitCost(p.costPrice);
-  }, [productId]);
-
-  const submit = () => {
-    if (!productId) { setErr("Selecciona un producto."); return; }
-    if (Number(qty) <= 0) { setErr("La cantidad debe ser mayor a 0."); return; }
-    onSave({ productId, qty: Number(qty), unitCost: Number(unitCost), vendor, date });
-  };
-
-  return (
-    <Modal title="Registrar compra" onClose={onClose}>
-      <FormRow label="Producto">
-        <select style={styles.input} value={productId} onChange={(e) => setProductId(e.target.value)}>
-          {products.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </FormRow>
-      <FormRow label="Proveedor">
-        <input style={styles.input} value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Ej: Distribuidora Central" />
-      </FormRow>
-      <div style={styles.formTwoCol}>
-        <FormRow label="Cantidad">
-          <input style={styles.input} type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} />
-        </FormRow>
-        <FormRow label="Costo unitario">
-          <input style={styles.input} type="number" min="0" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
-        </FormRow>
-      </div>
-      <FormRow label="Fecha">
-        <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </FormRow>
-      <p style={styles.totalPreview}>Total: <strong>{money(Number(qty) * Number(unitCost))}</strong></p>
-      {err && <p style={styles.formError}>{err}</p>}
-      <div style={styles.modalActions}>
-        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-        <button style={styles.primaryBtn} onClick={submit}>Registrar compra</button>
-      </div>
-    </Modal>
-  );
-}
-
-// ============================= GASTOS =============================
-
-function Gastos({ expenses, onAdd, onDelete }) {
-  const [modal, setModal] = useState(false);
-  const sorted = [...expenses].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-  return (
-    <div>
-      <PageHeader
-        eyebrow="Gastos"
-        title="Registro de gastos"
-        subtitle="Arriendo, servicios, sueldos y todo lo que no es compra de mercadería."
-        action={<button style={styles.primaryBtn} onClick={() => setModal(true)}><Plus size={16} /> Nuevo gasto</button>}
-      />
-      {sorted.length === 0 ? (
-        <EmptyNote text="No has registrado gastos todavía." />
-      ) : (
-        <MovementTable
-          rows={sorted}
-          columns={["Fecha", "Categoría", "Descripción", "Monto", ""]}
-          renderRow={(e) => (
-            <>
-              <td>{dateFmt(e.date)}</td>
-              <td>{e.category}</td>
-              <td>{e.description || "—"}</td>
-              <td style={{ color: "#F0987B", fontWeight: 600 }}>{money(e.amount)}</td>
-              <td><button style={styles.rowDeleteBtn} onClick={() => onDelete(e.id)}><Trash2 size={13} /></button></td>
-            </>
-          )}
-        />
-      )}
-      {modal && (
-        <ExpenseModal onClose={() => setModal(false)} onSave={(payload) => { onAdd(payload); setModal(false); }} />
-      )}
-    </div>
-  );
-}
-
-function ExpenseModal({ onClose, onSave }) {
-  const [category, setCategory] = useState(CATEGORY_OPTIONS_EXPENSE[0]);
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [date, setDate] = useState(todayStr());
-  const [err, setErr] = useState("");
-
-  const submit = () => {
-    if (Number(amount) <= 0) { setErr("El monto debe ser mayor a 0."); return; }
-    onSave({ category, description, amount: Number(amount), date });
-  };
-
-  return (
-    <Modal title="Registrar gasto" onClose={onClose}>
-      <FormRow label="Categoría">
-        <select style={styles.input} value={category} onChange={(e) => setCategory(e.target.value)}>
-          {CATEGORY_OPTIONS_EXPENSE.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </FormRow>
-      <FormRow label="Descripción">
-        <input style={styles.input} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ej: Cuenta de luz agosto" />
-      </FormRow>
-      <div style={styles.formTwoCol}>
-        <FormRow label="Monto">
-          <input style={styles.input} type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        </FormRow>
-        <FormRow label="Fecha">
-          <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </FormRow>
-      </div>
-      {err && <p style={styles.formError}>{err}</p>}
-      <div style={styles.modalActions}>
-        <button style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-        <button style={styles.primaryBtn} onClick={submit}>Registrar gasto</button>
-      </div>
-    </Modal>
-  );
-}
-
-// ============================= SHARED =============================
-
-function MovementTable({ rows, columns, renderRow }) {
-  return (
-    <div style={styles.tableWrap}>
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            {columns.map((c, i) => <th key={i} style={styles.th}>{c}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} style={styles.tr}>{renderRow(r)}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function FormRow({ label, children }) {
-  return (
-    <label style={styles.formRow}>
-      <span style={styles.formLabel}>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function Modal({ title, onClose, children }) {
-  return (
-    <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div style={styles.modalHead}>
-          <h3 style={styles.modalTitle}>{title}</h3>
-          <button style={styles.modalClose} onClick={onClose}><X size={16} /></button>
         </div>
-        <div style={styles.modalBody}>{children}</div>
-      </div>
-    </div>
-  );
-}
+      );
+    }
 
-// ============================= STYLES =============================
+    const styles = {
+      app: { display: "flex", minHeight: "92vh", background: "#12181F", color: "#EDEAE1", borderRadius: 12, overflow: "hidden", border: "1px solid #232C37" },
+      sidebar: { width: 230, background: "#0E141B", padding: "18px 14px", display: "flex", flexDirection: "column", borderRight: "1px solid #232C37" },
+      brand: { display: "flex", alignItems: "center", gap: 10, paddingBottom: 14, borderBottom: "1px solid #232C37" },
+      brandMark: { width: 34, height: 34, borderRadius: 8, background: "#E8A63D", color: "#412402", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13 },
+      brandTitle: { fontWeight: 700, fontSize: 14.5, color: "#EDEAE1" },
+      brandSub: { color: "#6B7480", fontSize: 10.5 },
+      
+      userCard: { display: "flex", alignItems: "center", gap: 9, background: "#1B232D", padding: "8px 10px", borderRadius: 8, margin: "14px 0 10px", border: "1px solid #232C37" },
+      userAvatar: { width: 30, height: 30, borderRadius: "50%", background: "#4FB3A9", color: "#0B2623", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 },
+      userName: { fontSize: 12.5, fontWeight: 600, color: "#EDEAE1", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+      roleBadge: { fontSize: 9.5, color: "#E8A63D", textTransform: "uppercase", letterSpacing: "0.04em", display: "block" },
+      logoutBtn: { background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" },
 
-const globalCss = `
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
-* { box-sizing: border-box; }
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-input, select, button { font-family: 'Inter', sans-serif; }
-input:focus, select:focus { outline: 2px solid #E8A63D; outline-offset: 1px; }
-button:focus-visible { outline: 2px solid #E8A63D; outline-offset: 1px; }
-::placeholder { color: #6B7280; }
-`;
+      nav: { display: "flex", flexDirection: "column", gap: 4, flex: 1, marginTop: 6 },
+      navItem: { display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 6, background: "transparent", border: "none", color: "#9AA2AE", fontSize: 13, cursor: "pointer", textAlign: "left" },
+      navItemActive: { background: "#1B232D", color: "#EDEAE1", fontWeight: 600 },
+      navBadge: { marginLeft: "auto", background: "#E1613D", color: "#FFF", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10 },
+      footerStatus: { color: "#6B7480", fontSize: 10.5, padding: "10px 4px 0", borderTop: "1px solid #232C37", display: "flex", alignItems: "center", gap: 6 },
 
-const styles = {
-  loadingScreen: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 480, background: "#12181F", borderRadius: 16 },
-  app: { display: "flex", minHeight: 640, background: "#12181F", fontFamily: "'Inter', sans-serif", borderRadius: 16, overflow: "hidden", border: "1px solid #232C37" },
-  sidebar: { width: 208, background: "#0E141B", padding: "20px 14px", display: "flex", flexDirection: "column", borderRight: "1px solid #232C37" },
-  brand: { display: "flex", alignItems: "center", gap: 10, padding: "0 6px 20px", borderBottom: "1px solid #232C37", marginBottom: 16 },
-  brandMark: { width: 34, height: 34, borderRadius: 8, background: "#E8A63D", color: "#412402", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 13 },
-  brandTitle: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14, lineHeight: 1.2 },
-  brandSub: { color: "#6B7480", fontSize: 11, marginTop: 2 },
-  nav: { display: "flex", flexDirection: "column", gap: 3, flex: 1 },
-  navItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, background: "transparent", border: "none", color: "#9AA2AE", fontSize: 13.5, fontWeight: 500, cursor: "pointer", textAlign: "left", position: "relative" },
-  navItemActive: { background: "#1B232D", color: "#EDEAE1" },
-  navBadge: { marginLeft: "auto", background: "#E1613D", color: "#FCEBEB", fontSize: 10.5, fontWeight: 600, padding: "1px 6px", borderRadius: 10 },
-  saveIndicator: { display: "flex", alignItems: "center", gap: 7, color: "#6B7480", fontSize: 11, padding: "10px 6px 0", borderTop: "1px solid #232C37" },
-  saveDot: { width: 6, height: 6, borderRadius: "50%", display: "inline-block" },
-  main: { flex: 1, padding: "26px 30px 40px", overflowY: "auto", maxHeight: 780 },
-  errorBanner: { display: "flex", alignItems: "center", gap: 8, background: "#3A1F17", color: "#F0987B", padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 16 },
-  errorClose: { marginLeft: "auto", background: "none", border: "none", color: "#F0987B", cursor: "pointer" },
-  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 22, gap: 16, flexWrap: "wrap" },
-  eyebrow: { color: "#E8A63D", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 },
-  pageTitle: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 22, margin: 0 },
-  pageSubtitle: { color: "#8B93A0", fontSize: 13, marginTop: 5, maxWidth: 440 },
-  kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 22 },
-  kpiCard: { background: "#1B232D", borderRadius: 10, padding: "14px 16px", border: "1px solid #232C37" },
-  kpiTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  kpiLabel: { color: "#8B93A0", fontSize: 12 },
-  kpiValue: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 20 },
-  dashGrid: { display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16 },
-  panel: { background: "#1B232D", borderRadius: 10, padding: "18px 20px", border: "1px solid #232C37" },
-  panelTitle: { display: "flex", alignItems: "center", gap: 7, color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14.5, margin: 0 },
-  emptyNote: { color: "#6B7480", fontSize: 13, marginTop: 12, lineHeight: 1.5 },
-  barRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 5, fontSize: 12.5 },
-  barRank: { color: "#6B7480", width: 14, fontFamily: "'IBM Plex Mono', monospace" },
-  barLabel: { color: "#EDEAE1", flex: 1 },
-  barQty: { color: "#8B93A0", fontFamily: "'IBM Plex Mono', monospace" },
-  barTrack: { height: 6, background: "#0E141B", borderRadius: 4, overflow: "hidden" },
-  barFill: { height: "100%", background: "#E8A63D", borderRadius: 4 },
-  lowStockRow: { display: "flex", justifyContent: "space-between", fontSize: 13, color: "#EDEAE1", padding: "6px 0", borderBottom: "1px solid #232C37" },
-  lowStockQty: { color: "#F0987B", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 },
-  activityRow: { display: "grid", gridTemplateColumns: "70px 1fr auto auto", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #232C37", fontSize: 12.5 },
-  activityTag: { fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", padding: "2px 7px", borderRadius: 5, textAlign: "center", letterSpacing: "0.03em" },
-  activityLabel: { color: "#EDEAE1" },
-  activityDetail: { color: "#8B93A0", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5 },
-  activityDate: { color: "#6B7480", fontSize: 11.5, whiteSpace: "nowrap" },
-  searchWrap: { display: "flex", alignItems: "center", gap: 8, background: "#1B232D", border: "1px solid #232C37", borderRadius: 8, padding: "8px 12px", marginBottom: 18, maxWidth: 320 },
-  searchInput: { flex: 1, background: "transparent", border: "none", color: "#EDEAE1", fontSize: 13.5 },
-  tagGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 },
-  tag: { position: "relative", background: "#F3EFE4", borderRadius: 10, padding: "16px 16px 14px 20px", color: "#2B2A22" },
-  tagNotches: { position: "absolute", left: -1, top: 0, bottom: 0, width: 12, display: "flex", flexDirection: "column", justifyContent: "space-evenly", background: "#12181F", borderTopLeftRadius: 10, borderBottomLeftRadius: 10 },
-  tagNotch: { width: 8, height: 8, borderRadius: "50%", background: "#12181F", boxShadow: "0 0 0 8px #12181F, inset 0 0 0 8px #12181F" },
-  tagBody: { paddingLeft: 6 },
-  tagHeadRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
-  tagCategory: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "#8A7A4E" },
-  tagLowBadge: { display: "flex", alignItems: "center", gap: 3, background: "#F0997B", color: "#4A1B0C", fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 5 },
-  tagName: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 15.5, marginBottom: 2 },
-  tagSku: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#8A7A4E", marginBottom: 8 },
-  tagDivider: { borderTop: "1px dashed #C9C2AC", margin: "8px 0" },
-  tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3, color: "#4A4636" },
-  tagActions: { display: "flex", gap: 8, marginTop: 12 },
-  tagBtn: { display: "flex", alignItems: "center", gap: 4, background: "none", border: "1px solid #C9C2AC", borderRadius: 6, padding: "5px 9px", fontSize: 11.5, color: "#4A4636", cursor: "pointer" },
-  tableWrap: { background: "#1B232D", borderRadius: 10, border: "1px solid #232C37", overflow: "hidden" },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
-  th: { textAlign: "left", padding: "10px 14px", color: "#8B93A0", fontWeight: 500, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: "1px solid #232C37" },
-  tr: { borderBottom: "1px solid #232C37" },
-  rowDeleteBtn: { background: "none", border: "none", color: "#8B93A0", cursor: "pointer", padding: 4 },
-  primaryBtn: { display: "flex", alignItems: "center", gap: 6, background: "#E8A63D", color: "#412402", border: "none", borderRadius: 8, padding: "9px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer" },
-  secondaryBtn: { background: "transparent", color: "#8B93A0", border: "1px solid #2E3844", borderRadius: 8, padding: "9px 14px", fontWeight: 500, fontSize: 13, cursor: "pointer" },
-  overlay: { position: "fixed", inset: 0, background: "rgba(10,14,18,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 },
-  modal: { background: "#1B232D", border: "1px solid #2E3844", borderRadius: 12, width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" },
-  modalHead: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid #232C37" },
-  modalTitle: { color: "#EDEAE1", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 15.5, margin: 0 },
-  modalClose: { background: "none", border: "none", color: "#8B93A0", cursor: "pointer" },
-  modalBody: { padding: "18px 20px 20px" },
-  modalActions: { display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 },
-  formRow: { display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 },
-  formLabel: { color: "#8B93A0", fontSize: 12 },
-  formTwoCol: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
-  input: { background: "#12181F", border: "1px solid #2E3844", borderRadius: 7, padding: "8px 10px", color: "#EDEAE1", fontSize: 13.5, width: "100%" },
-  formError: { color: "#F0987B", fontSize: 12.5, marginBottom: 8 },
-  totalPreview: { color: "#EDEAE1", fontSize: 13.5, marginBottom: 12 },
-};
+      main: { flex: 1, padding: "26px 30px", overflowY: "auto" },
+      pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+      eyebrow: { color: "#E8A63D", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em" },
+      pageTitle: { margin: "2px 0 0", fontSize: 21 },
+      
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 20 },
+      kpiCard: { background: "#1B232D", border: "1px solid #232C37", borderRadius: 8, padding: "14px 16px" },
+      kpiLabel: { color: "#8B93A0", fontSize: 12 },
+      kpiValue: { fontSize: 19, fontWeight: 700, marginTop: 6 },
+      
+      dashGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
+      panel: { background: "#1B232D", border: "1px solid #232C37", borderRadius: 8, padding: "16px 18px" },
+      panelTitle: { margin: "0 0 12px 0", fontSize: 14, color: "#EDEAE1" },
+      lowStockRow: { display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #232C37", fontSize: 13 },
+      
+      tagGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 14 },
+      tag: { background: "#F3EFE4", color: "#2B2A22", borderRadius: 8, padding: 14 },
+      tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12, margin: "3px 0", color: "#4A4636" },
+      
+      primaryBtn: { background: "#E8A63D", color: "#412402", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 },
+      secondaryBtn: { background: "transparent", color: "#EDEAE1", border: "1px solid #2E3844", borderRadius: 6, padding: "8px 14px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
+      actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px" },
+      
+      badgeOrange: { background: "#3A2E17", color: "#E8A63D", padding: "2px 7px", borderRadius: 4, fontSize: 11, fontWeight: 600 },
+      badgeGray: { background: "#232C37", color: "#8B93A0", padding: "2px 7px", borderRadius: 4, fontSize: 11 },
+
+      authContainer: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "85vh" },
+      authCard: { background: "#12181F", border: "1px solid #232C37", borderRadius: 12, padding: "28px 30px", width: "100%", maxWidth: 400 },
+      authLogo: { width: 44, height: 44, borderRadius: 10, background: "#E8A63D", color: "#412402", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 },
+      authTabs: { display: "flex", background: "#0E141B", padding: 3, borderRadius: 8, marginBottom: 18, border: "1px solid #232C37" },
+      authTabBtn: { flex: 1, padding: "8px 0", background: "none", border: "none", color: "#8B93A0", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 6 },
+      authTabActive: { background: "#1B232D", color: "#EDEAE1" },
+      inputLabel: { display: "block", color: "#8B93A0", fontSize: 11.5, marginBottom: 5 },
+      input: { background: "#0E141B", border: "1px solid #2E3844", borderRadius: 6, padding: "9px 12px", color: "#EDEAE1", fontSize: 13, width: "100%" },
+      submitBtn: { background: "#E8A63D", color: "#412402", border: "none", borderRadius: 6, padding: "10px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 6 },
+      errorMsg: { background: "#3A1F17", color: "#F0987B", padding: "8px 10px", borderRadius: 6, fontSize: 12 },
+      demoSection: { marginTop: 18, paddingTop: 14, borderTop: "1px solid #232C37", textAlign: "center" },
+      quickDemoBtn: { background: "#1B232D", border: "1px solid #2E3844", color: "#EDEAE1", padding: "4px 10px", borderRadius: 5, fontSize: 11, cursor: "pointer", flex: 1 },
+
+      overlay: { position: "fixed", inset: 0, background: "rgba(10,14,18,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 },
+      modal: { background: "#1B232D", border: "1px solid #2E3844", borderRadius: 10, padding: 20, width: "100%", maxWidth: 460 }
+    };
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
