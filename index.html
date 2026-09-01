@@ -1,797 +1,1814 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Almacen - Control Multi-Bodega & Acceso</title>
-  <!-- Supabase JS Client CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <!-- React & Babel Standalone CDN -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #0A0E12; display: flex; justify-content: center; padding: 20px; font-family: 'Inter', system-ui, sans-serif; }
-    #root { width: 100%; max-width: 1280px; }
-    input, select, button { font-family: inherit; }
-    input:focus, select:focus { outline: 2px solid #0c4f1c; outline-offset: 1px; }
-    button:focus-visible { outline: 2px solid #0c4f1c; }
-    ::placeholder { color: #6B7280; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Almacén - Control Comercial & Espacio Personal</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { 
+    box-sizing: border-box; 
+    margin: 0; 
+    padding: 0;
+  }
+  body { 
+    margin: 0; 
+    background: #07090e; 
+    min-height: 100vh;
+    display: flex; 
+    justify-content: center; 
+    align-items: center;
+    padding: 20px; 
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif; 
+    color: #F1F5F9;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* Orbes de luz ambiental de fondo para efecto Glassmorphism */
+  .ambient-orb {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(100px);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.45;
+    animation: floatOrb 18s ease-in-out infinite alternate;
+  }
+  .orb-1 { width: 450px; height: 450px; background: radial-gradient(circle, #0c4f1c, #063111); top: -80px; left: -80px; }
+  .orb-2 { width: 400px; height: 400px; background: radial-gradient(circle, #0ea5e9, #0369a1); bottom: -60px; right: -60px; animation-delay: -5s; }
+  .orb-3 { width: 320px; height: 320px; background: radial-gradient(circle, #8b5cf6, #5b21b6); top: 40%; left: 45%; opacity: 0.25; animation-delay: -10s; }
+
+  @keyframes floatOrb {
+    0% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(35px, 25px) scale(1.08); }
+    100% { transform: translate(-25px, 45px) scale(0.95); }
+  }
+
+  #root { 
+    width: 100%; 
+    max-width: 1320px; 
+    z-index: 1;
+    position: relative;
+  }
+
+  input, select, button, textarea { 
+    font-family: inherit; 
+  }
+  
+  /* Scrollbar personalizado con estilo Glass */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
+</style>
 </head>
 <body>
+  <div class="ambient-orb orb-1"></div>
+  <div class="ambient-orb orb-2"></div>
+  <div class="ambient-orb orb-3"></div>
+
   <div id="root"></div>
 
-  <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef } = React;
 
-    const Icon = ({ name, size = 16, color = "currentColor", ...props }) => {
-      const iconRef = useRef(null);
-      useEffect(() => {
-        if (window.lucide && iconRef.current) {
-          window.lucide.createIcons();
-        }
-      }, [name]);
-      return <i data-lucide={name} style={{ width: size, height: size, color, display: "inline-flex", verticalAlign: "middle" }} ref={iconRef} {...props}></i>;
-    };
+const Icon = ({ name, size = 16, color = "currentColor", ...props }) => {
+  const iconRef = useRef(null);
+  useEffect(() => {
+    if (window.lucide && iconRef.current) {
+      window.lucide.createIcons();
+    }
+  }, [name]);
+  return <i data-lucide={name} style={{ width: size, height: size, color, display: "inline-flex", verticalAlign: "middle" }} ref={iconRef} {...props}></i>;
+};
 
-    const AUTH_KEY = "negocio_active_user_v1";
-    const USERS_KEY = "negocio_users_list_v1";
-    const SALES_KEY = "negocio_sales_list_v1";
-    const PROD_KEY = "negocio_products_v1";
+// Claves de LocalStorage
+const AUTH_KEY = "negocio_active_user_v2";
+const USERS_KEY = "negocio_users_list_v2";
+const SALES_KEY = "negocio_sales_list_v2";
+const PROD_KEY = "negocio_products_v2";
+const EXPENSES_KEY = "negocio_expenses_v2";
+const CUSTOMERS_KEY = "negocio_customers_v2";
+const PERSONAL_FINANCES_KEY = "negocio_personal_finances_v2";
 
-    const initialUsers = [
-      { id: "u-admin", name: "Benjamín Parra", email: "admin@negocio.cl", pass: "123", role: "Administrador" },
-      { id: "u-bodega", name: "R Almacén", email: "bodega@negocio.cl", pass: "123", role: "Bodeguero" },
-      { id: "u-ventas", name: "Anon Ventas", email: "ventas@negocio.cl", pass: "123", role: "Vendedor" }
-    ];
+const initialUsers = [
+  { id: "u-admin", name: "Benjamín", email: "admin@negocio.cl", pass: "123", role: "Administrador" },
+  { id: "u-personal", name: "Benjamín (Personal)", email: "personal@negocio.cl", pass: "123", role: "Personal" },
+  { id: "u-bodega", name: "R Almacén", email: "bodega@negocio.cl", pass: "123", role: "Bodeguero" },
+  { id: "u-ventas", name: "Anon Ventas", email: "ventas@negocio.cl", pass: "123", role: "Vendedor" }
+];
 
-    const defaultLocations = [
-      { id: "loc-central", name: "Bodega Central" },
-      { id: "loc-tienda", name: "Tienda Principal" }
-    ];
+const defaultLocations = [
+  { id: "loc-central", name: "Bodega Central" },
+  { id: "loc-tienda", name: "Tienda Principal" }
+];
 
-    const initialMockProducts = [
-      { id: "p1", name: "Polera Oversize Algodón", category: "Ropa", sku: "ROP-POL-101", barcode: "7801001", costPrice: 6500, salePrice: 14990, minStock: 5, stockByLocation: { "loc-central": 18, "loc-tienda": 4 } },
-      { id: "p2", name: "Taza Cerámica Negra", category: "Bazar", sku: "BAZ-TAZ-202", barcode: "7802002", costPrice: 2100, salePrice: 5990, minStock: 6, stockByLocation: { "loc-central": 3, "loc-tienda": 1 } },
-      { id: "p3", name: "Gorra Snapback Urbana", category: "Ropa", sku: "ROP-GOR-303", barcode: "7803003", costPrice: 4200, salePrice: 9990, minStock: 2, stockByLocation: { "loc-central": 12, "loc-tienda": 8 } }
-    ];
+const initialMockProducts = [
+  { id: "p1", name: "Polera Oversize Algodón", category: "Ropa", sku: "ROP-POL-101", barcode: "7801001", costPrice: 6500, salePrice: 14990, minStock: 5, stockByLocation: { "loc-central": 18, "loc-tienda": 4 } },
+  { id: "p2", name: "Taza Cerámica Negra", category: "Bazar", sku: "BAZ-TAZ-202", barcode: "7802002", costPrice: 2100, salePrice: 5990, minStock: 6, stockByLocation: { "loc-central": 3, "loc-tienda": 1 } },
+  { id: "p3", name: "Gorra Snapback Urbana", category: "Ropa", sku: "ROP-GOR-303", barcode: "7803003", costPrice: 4200, salePrice: 9990, minStock: 2, stockByLocation: { "loc-central": 12, "loc-tienda": 8 } }
+];
 
-    const initialMockSales = [
-      { id: "s1", date: new Date().toISOString().slice(0, 10), customerName: "Carlos Soto", paymentMethod: "Tarjeta Débito", total: 29980, details: "2x Polera Oversize Algodón" },
-      { id: "s2", date: new Date().toISOString().slice(0, 10), customerName: "Consumidor Final", paymentMethod: "Efectivo", total: 9990, details: "1x Gorra Snapback" }
-    ];
+const initialMockSales = [
+  { id: "s1", date: new Date().toISOString().slice(0, 10), customerName: "Carlos Soto", paymentMethod: "Tarjeta Débito", total: 29980, details: "2x Polera Oversize Algodón" },
+  { id: "s2", date: new Date().toISOString().slice(0, 10), customerName: "Consumidor Final", paymentMethod: "Efectivo", total: 9990, details: "1x Gorra Snapback" }
+];
 
-    const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
-    const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+const initialMockExpenses = [
+  { id: "e1", date: new Date().toISOString().slice(0, 10), category: "Arriendo", description: "Arriendo local principal", amount: 350000 },
+  { id: "e2", date: new Date().toISOString().slice(0, 10), category: "Insumos", description: "Compra de bolsas y etiquetas", amount: 18500 }
+];
 
-    function App() {
-      const [users, setUsers] = useState(() => {
-        const local = localStorage.getItem(USERS_KEY);
-        return local ? JSON.parse(local) : initialUsers;
-      });
+const initialMockCustomers = [
+  { id: "c1", name: "Carlos Soto", phone: "+56 9 1234 5678" },
+  { id: "c2", name: "Consumidor Final", phone: "" }
+];
 
-      const [currentUser, setCurrentUser] = useState(() => {
-        const active = localStorage.getItem(AUTH_KEY);
-        return active ? JSON.parse(active) : null;
-      });
+// Movimientos Personales Iniciales
+const initialPersonalFinances = [
+  { id: "pf-1", date: new Date().toISOString().slice(0, 10), type: "ingreso", category: "Retiro de Ganancias", description: "Sueldo / Retiro del Negocio", amount: 450000 },
+  { id: "pf-2", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Alimentación", description: "Supermercado quincena", amount: 65000 },
+  { id: "pf-3", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Servicios Personales", description: "Plan de Telefonía y Streaming", amount: 22990 },
+  { id: "pf-4", date: new Date().toISOString().slice(0, 10), type: "ingreso", category: "Otros Ingresos", description: "Trabajo freelance independiente", amount: 120000 }
+];
 
-      const [products, setProducts] = useState(() => {
-        const local = localStorage.getItem(PROD_KEY);
-        return local ? JSON.parse(local) : initialMockProducts;
-      });
+const EXPENSE_CATEGORIES = ["Arriendo", "Insumos", "Sueldos", "Servicios", "Marketing", "Transporte", "Otros"];
+const PERSONAL_CATEGORIES = ["Alimentación", "Vivienda", "Transporte", "Servicios Personales", "Salud & Bienestar", "Ocio & Viajes", "Ahorro / Inversión", "Retiro de Ganancias", "Otros Ingresos", "Otros Gastos"];
 
-      const [sales, setSales] = useState(() => {
-        const local = localStorage.getItem(SALES_KEY);
-        return local ? JSON.parse(local) : initialMockSales;
-      });
+const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
+const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
-      const [tab, setTab] = useState("dashboard");
-      const [locations] = useState(defaultLocations);
+function App() {
+  const [users, setUsers] = useState(() => {
+    const local = localStorage.getItem(USERS_KEY);
+    return local ? JSON.parse(local) : initialUsers;
+  });
+  const [currentUser, setCurrentUser] = useState(() => {
+    const active = localStorage.getItem(AUTH_KEY);
+    return active ? JSON.parse(active) : null;
+  });
+  const [products, setProducts] = useState(() => {
+    const local = localStorage.getItem(PROD_KEY);
+    return local ? JSON.parse(local) : initialMockProducts;
+  });
+  const [sales, setSales] = useState(() => {
+    const local = localStorage.getItem(SALES_KEY);
+    return local ? JSON.parse(local) : initialMockSales;
+  });
+  const [expenses, setExpenses] = useState(() => {
+    const local = localStorage.getItem(EXPENSES_KEY);
+    return local ? JSON.parse(local) : initialMockExpenses;
+  });
+  const [customers, setCustomers] = useState(() => {
+    const local = localStorage.getItem(CUSTOMERS_KEY);
+    return local ? JSON.parse(local) : initialMockCustomers;
+  });
+  const [personalFinances, setPersonalFinances] = useState(() => {
+    const local = localStorage.getItem(PERSONAL_FINANCES_KEY);
+    return local ? JSON.parse(local) : initialPersonalFinances;
+  });
 
-      // Modal de edición / creación de ventas
-      const [saleModalState, setSaleModalState] = useState(null);
+  const [tab, setTab] = useState("dashboard");
+  const [locations] = useState(defaultLocations);
 
-      useEffect(() => {
-        localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      }, [users]);
+  // Modales
+  const [saleModalState, setSaleModalState] = useState(null);
+  const [expenseModalState, setExpenseModalState] = useState(null);
+  const [customerModalState, setCustomerModalState] = useState(null);
+  const [personalModalState, setPersonalModalState] = useState(null);
 
-      useEffect(() => {
-        localStorage.setItem(SALES_KEY, JSON.stringify(sales));
-      }, [sales]);
+  useEffect(() => { localStorage.setItem(USERS_KEY, JSON.stringify(users)); }, [users]);
+  useEffect(() => { localStorage.setItem(SALES_KEY, JSON.stringify(sales)); }, [sales]);
+  useEffect(() => { localStorage.setItem(PROD_KEY, JSON.stringify(products)); }, [products]);
+  useEffect(() => { localStorage.setItem(EXPENSES_KEY, JSON.stringify(expenses)); }, [expenses]);
+  useEffect(() => { localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(customers)); }, [customers]);
+  useEffect(() => { localStorage.setItem(PERSONAL_FINANCES_KEY, JSON.stringify(personalFinances)); }, [personalFinances]);
 
-      useEffect(() => {
-        localStorage.setItem(PROD_KEY, JSON.stringify(products));
-      }, [products]);
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem(AUTH_KEY, JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem(AUTH_KEY);
+    }
+    if (window.lucide) window.lucide.createIcons();
+  }, [currentUser, tab, sales, personalFinances]);
 
-      useEffect(() => {
-        if (currentUser) {
-          localStorage.setItem(AUTH_KEY, JSON.stringify(currentUser));
-        } else {
-          localStorage.removeItem(AUTH_KEY);
-        }
-        if (window.lucide) window.lucide.createIcons();
-      }, [currentUser, tab, sales]);
+  const handleLogin = (userObj) => {
+    setCurrentUser(userObj);
+    setTab("dashboard");
+  };
 
-      const handleLogin = (userObj) => {
-        setCurrentUser(userObj);
-        setTab("dashboard");
-      };
+  const handleLogout = () => {
+    setCurrentUser(null);
+  };
 
-      const handleLogout = () => {
-        setCurrentUser(null);
-      };
+  const handleRegister = (newUser) => {
+    setUsers(prev => [...prev, newUser]);
+    setCurrentUser(newUser);
+  };
 
-      const handleRegister = (newUser) => {
-        setUsers(prev => [...prev, newUser]);
-        setCurrentUser(newUser);
-      };
+  const ensureCustomerExists = (name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    setCustomers(prev => {
+      const exists = prev.some(c => c.name.toLowerCase() === trimmed.toLowerCase());
+      if (exists) return prev;
+      return [...prev, { id: "c-" + Date.now(), name: trimmed, phone: "" }];
+    });
+  };
 
-      // Operaciones de Ventas (CRUD)
-      const handleSaveSale = (saleData) => {
-        if (saleModalState === "new") {
-          const newEntry = { ...saleData, id: "s-" + Date.now() };
-          setSales(prev => [newEntry, ...prev]);
-        } else {
-          setSales(prev => prev.map(s => s.id === saleModalState.id ? { ...saleData, id: s.id } : s));
-        }
-        setSaleModalState(null);
-      };
+  // CRUD Ventas
+  const handleSaveSale = (saleData) => {
+    if (saleModalState === "new") {
+      const newEntry = { ...saleData, id: "s-" + Date.now() };
+      setSales(prev => [newEntry, ...prev]);
+    } else {
+      setSales(prev => prev.map(s => s.id === saleModalState.id ? { ...saleData, id: s.id } : s));
+    }
+    ensureCustomerExists(saleData.customerName);
+    setSaleModalState(null);
+  };
 
-      const handleDeleteSale = (saleId) => {
-        if (confirm("¿Estás seguro de eliminar esta venta del registro?")) {
-          setSales(prev => prev.filter(s => s.id !== saleId));
-        }
-      };
+  const handleDeleteSale = (saleId) => {
+    if (confirm("¿Estás seguro de eliminar esta venta del registro?")) {
+      setSales(prev => prev.filter(s => s.id !== saleId));
+    }
+  };
 
-      if (!currentUser) {
-        return <AuthScreen onLogin={handleLogin} onRegister={handleRegister} users={users} />;
-      }
+  // CRUD Gastos Negocio
+  const handleSaveExpense = (expenseData) => {
+    if (expenseModalState === "new") {
+      const newEntry = { ...expenseData, id: "e-" + Date.now() };
+      setExpenses(prev => [newEntry, ...prev]);
+    } else {
+      setExpenses(prev => prev.map(e => e.id === expenseModalState.id ? { ...expenseData, id: e.id } : e));
+    }
+    setExpenseModalState(null);
+  };
 
-      const role = currentUser.role || "Vendedor";
-      const canAccessFinances = role === "Administrador";
-      const canAccessWarehouses = role === "Administrador" || role === "Bodeguero";
-      const canAccessSales = role === "Administrador" || role === "Vendedor";
+  const handleDeleteExpense = (expenseId) => {
+    if (confirm("¿Estás seguro de eliminar este gasto del registro?")) {
+      setExpenses(prev => prev.filter(e => e.id !== expenseId));
+    }
+  };
 
-      const lowStock = products.filter(p => getProductTotalStock(p) <= (p.minStock || 0));
-      const totalSales = sales.reduce((a, s) => a + Number(s.total || 0), 0);
+  // CRUD Clientes
+  const handleSaveCustomer = (customerData) => {
+    if (customerModalState === "new") {
+      const newEntry = { ...customerData, id: "c-" + Date.now() };
+      setCustomers(prev => [newEntry, ...prev]);
+    } else {
+      setCustomers(prev => prev.map(c => c.id === customerModalState.id ? { ...customerData, id: c.id } : c));
+    }
+    setCustomerModalState(null);
+  };
 
-      return (
-        <div style={styles.app}>
-          <aside style={styles.sidebar}>
-            <div style={styles.brand}>
-              <div style={styles.brandMark}>PRO</div>
+  const handleDeleteCustomer = (customerId) => {
+    if (confirm("¿Estás seguro de eliminar este cliente del registro?")) {
+      setCustomers(prev => prev.filter(c => c.id !== customerId));
+    }
+  };
+
+  // CRUD Finanzas Personales
+  const handleSavePersonalFinance = (itemData) => {
+    if (personalModalState === "new") {
+      const newEntry = { ...itemData, id: "pf-" + Date.now() };
+      setPersonalFinances(prev => [newEntry, ...prev]);
+    } else {
+      setPersonalFinances(prev => prev.map(item => item.id === personalModalState.id ? { ...itemData, id: item.id } : item));
+    }
+    setPersonalModalState(null);
+  };
+
+  const handleDeletePersonalFinance = (id) => {
+    if (confirm("¿Eliminar este movimiento de tus finanzas personales?")) {
+      setPersonalFinances(prev => prev.filter(i => i.id !== id));
+    }
+  };
+
+  if (!currentUser) {
+    return <AuthScreen onLogin={handleLogin} onRegister={handleRegister} users={users} />;
+  }
+
+  const role = currentUser.role || "Vendedor";
+  const canAccessFinances = role === "Administrador" || role === "Personal";
+  const canAccessPersonal = role === "Administrador" || role === "Personal";
+  const canAccessWarehouses = role === "Administrador" || role === "Bodeguero";
+  const canAccessSales = role === "Administrador" || role === "Vendedor";
+  const canAccessCustomers = role === "Administrador" || role === "Vendedor";
+
+  const lowStock = products.filter(p => getProductTotalStock(p) <= (p.minStock || 0));
+  const totalSales = sales.reduce((a, s) => a + Number(s.total || 0), 0);
+  const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount || 0), 0);
+  const profit = totalSales - totalExpenses;
+
+  // Métricas personales
+  const personalIncome = personalFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
+  const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
+  const personalBalance = personalIncome - personalExpense;
+
+  return (
+    <div style={styles.appContainer}>
+      <aside style={styles.sidebar}>
+        <div style={styles.brand}>
+          <div style={styles.brandMark}>
+            <Icon name="boxes" size={18} color="#EDEAE1" />
+          </div>
+          <div>
+            <div style={styles.brandTitle}>Almacén PRO</div>
+            <div style={styles.brandSub}>Control Glass & Personal</div>
+          </div>
+        </div>
+
+        <div style={styles.userCard}>
+          <div style={styles.userAvatar}>
+            {currentUser.name.slice(0, 2).toUpperCase()}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={styles.userName}>{currentUser.name}</div>
+            <span style={{ ...styles.roleBadge, color: role === "Personal" ? "#C084FC" : "#34D399" }}>
+              {currentUser.role}
+            </span>
+          </div>
+          <button style={styles.logoutBtn} onClick={handleLogout} title="Cerrar sesión">
+            <Icon name="log-out" size={14} color="#F87171" />
+          </button>
+        </div>
+
+        <nav style={styles.nav}>
+          <button onClick={() => setTab("dashboard")} style={{ ...styles.navItem, ...(tab === "dashboard" ? styles.navItemActive : {}) }}>
+            <Icon name="layout-dashboard" size={16} />
+            <span>Panel General</span>
+          </button>
+          
+          {canAccessPersonal && (
+            <button onClick={() => setTab("personal")} style={{ ...styles.navItem, ...(tab === "personal" ? styles.navItemActive : {}) }}>
+              <Icon name="wallet" size={16} color="#C084FC" />
+              <span>Espacio Personal</span>
+              <span style={styles.navBadgePurple}>Mío</span>
+            </button>
+          )}
+
+          <button onClick={() => setTab("inventario")} style={{ ...styles.navItem, ...(tab === "inventario" ? styles.navItemActive : {}) }}>
+            <Icon name="package" size={16} />
+            <span>Inventario</span>
+            {lowStock.length > 0 && <span style={styles.navBadge}>{lowStock.length}</span>}
+          </button>
+          
+          {canAccessWarehouses && (
+            <button onClick={() => setTab("bodegas")} style={{ ...styles.navItem, ...(tab === "bodegas" ? styles.navItemActive : {}) }}>
+              <Icon name="warehouse" size={16} />
+              <span>Bodegas & Traspaso</span>
+            </button>
+          )}
+
+          {canAccessSales && (
+            <button onClick={() => setTab("ventas")} style={{ ...styles.navItem, ...(tab === "ventas" ? styles.navItemActive : {}) }}>
+              <Icon name="shopping-cart" size={16} />
+              <span>Ventas & Caja</span>
+            </button>
+          )}
+
+          {canAccessCustomers && (
+            <button onClick={() => setTab("clientes")} style={{ ...styles.navItem, ...(tab === "clientes" ? styles.navItemActive : {}) }}>
+              <Icon name="users-round" size={16} />
+              <span>Clientes</span>
+            </button>
+          )}
+
+          {canAccessFinances && (
+            <button onClick={() => setTab("gastos")} style={{ ...styles.navItem, ...(tab === "gastos" ? styles.navItemActive : {}) }}>
+              <Icon name="receipt" size={16} />
+              <span>Gastos Negocio</span>
+            </button>
+          )}
+
+          {(role === "Administrador") && (
+            <button onClick={() => setTab("usuarios")} style={{ ...styles.navItem, ...(tab === "usuarios" ? styles.navItemActive : {}) }}>
+              <Icon name="shield-check" size={16} />
+              <span>Equipo & Roles</span>
+            </button>
+          )}
+        </nav>
+
+        <div style={styles.footerStatus}>
+          <span style={styles.statusDot}></span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUser.email}</span>
+        </div>
+      </aside>
+
+      <main style={styles.main}>
+        {tab === "dashboard" && (
+          <Dashboard
+            currentUser={currentUser}
+            canAccessSales={canAccessSales}
+            canAccessPersonal={canAccessPersonal}
+            sales={sales}
+            expenses={expenses}
+            products={products}
+            lowStock={lowStock}
+            locations={locations}
+            customers={customers}
+            totalSales={totalSales}
+            totalExpenses={totalExpenses}
+            profit={profit}
+            personalFinances={personalFinances}
+            personalIncome={personalIncome}
+            personalExpense={personalExpense}
+            personalBalance={personalBalance}
+            onNewSale={() => setSaleModalState("new")}
+            onNewPersonal={() => setPersonalModalState("new")}
+            onGoToPersonal={() => setTab("personal")}
+          />
+        )}
+
+        {tab === "personal" && canAccessPersonal && (
+          <PersonalFinancesManager
+            personalFinances={personalFinances}
+            income={personalIncome}
+            expense={personalExpense}
+            balance={personalBalance}
+            onNew={() => setPersonalModalState("new")}
+            onEdit={(item) => setPersonalModalState(item)}
+            onDelete={handleDeletePersonalFinance}
+          />
+        )}
+
+        {tab === "inventario" && (
+          <div>
+            <div style={styles.pageHeader}>
               <div>
-                <div style={styles.brandTitle}>Almacén PRO</div>
-                <div style={styles.brandSub}>Control Multi-Bodega</div>
+                <div style={styles.eyebrow}>INVENTARIO & CATÁLOGO</div>
+                <h2 style={styles.pageTitle}>Fichas de Productos y Existencias</h2>
               </div>
             </div>
-
-            <div style={styles.userCard}>
-              <div style={styles.userAvatar}>
-                {currentUser.name.slice(0, 2).toUpperCase()}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={styles.userName}>{currentUser.name}</div>
-                <span style={styles.roleBadge}>{currentUser.role}</span>
-              </div>
-              <button style={styles.logoutBtn} onClick={handleLogout} title="Cerrar sesión">
-                <Icon name="log-out" size={14} color="#F0987B" />
-              </button>
-            </div>
-
-            <nav style={styles.nav}>
-              <button onClick={() => setTab("dashboard")} style={{ ...styles.navItem, ...(tab === "dashboard" ? styles.navItemActive : {}) }}>
-                <Icon name="layout-dashboard" size={16} />
-                <span>Panel</span>
-              </button>
-
-              <button onClick={() => setTab("inventario")} style={{ ...styles.navItem, ...(tab === "inventario" ? styles.navItemActive : {}) }}>
-                <Icon name="package" size={16} />
-                <span>Inventario</span>
-                {lowStock.length > 0 && <span style={styles.navBadge}>{lowStock.length}</span>}
-              </button>
-
-              {canAccessWarehouses && (
-                <button onClick={() => setTab("bodegas")} style={{ ...styles.navItem, ...(tab === "bodegas" ? styles.navItemActive : {}) }}>
-                  <Icon name="warehouse" size={16} />
-                  <span>Bodegas & Traspaso</span>
-                </button>
-              )}
-
-              {canAccessSales && (
-                <button onClick={() => setTab("ventas")} style={{ ...styles.navItem, ...(tab === "ventas" ? styles.navItemActive : {}) }}>
-                  <Icon name="shopping-cart" size={16} />
-                  <span>Ventas & Caja</span>
-                </button>
-              )}
-
-              {canAccessFinances && (
-                <button onClick={() => setTab("usuarios")} style={{ ...styles.navItem, ...(tab === "usuarios" ? styles.navItemActive : {}) }}>
-                  <Icon name="users" size={16} />
-                  <span>Equipo & Accesos</span>
-                </button>
-              )}
-            </nav>
-
-            <div style={styles.footerStatus}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#0c4f1c" }}></span>
-              <span>Conectado: {currentUser.email}</span>
-            </div>
-          </aside>
-
-          <main style={styles.main}>
-            {tab === "dashboard" && (
-              <div>
-                <div style={styles.pageHeader}>
-                  <div>
-                    <div style={styles.eyebrow}>RESUMEN GENERAL</div>
-                    <h2 style={styles.pageTitle}>Bienvenido, {currentUser.name}</h2>
-                  </div>
-                  {canAccessSales && (
-                    <button style={styles.primaryBtn} onClick={() => setSaleModalState("new")}>
-                      <Icon name="plus" size={14} /> Registrar Venta
-                    </button>
-                  )}
-                </div>
-
-                <div style={styles.kpiGrid}>
-                  <div style={styles.kpiCard}>
-                    <span style={styles.kpiLabel}>Ventas Registradas</span>
-                    <div style={{ ...styles.kpiValue, color: "#7FD9C4" }}>{money(totalSales)}</div>
-                  </div>
-                  <div style={styles.kpiCard}>
-                    <span style={styles.kpiLabel}>Productos en Catálogo</span>
-                    <div style={{ ...styles.kpiValue, color: "#0c4f1c" }}>{products.length} artículos</div>
-                  </div>
-                  <div style={styles.kpiCard}>
-                    <span style={styles.kpiLabel}>Stock Crítico</span>
-                    <div style={{ ...styles.kpiValue, color: lowStock.length > 0 ? "#F0987B" : "#7FD9C4" }}>{lowStock.length} items</div>
-                  </div>
-                </div>
-
-                <div style={styles.dashGrid}>
-                  <div style={styles.panel}>
-                    <h3 style={styles.panelTitle}>Alertas de Reposición</h3>
-                    {lowStock.length === 0 ? (
-                      <p style={{ color: "#6B7480", fontSize: 13 }}>Todo el stock se encuentra en niveles óptimos.</p>
-                    ) : (
-                      lowStock.map(p => (
-                        <div key={p.id} style={styles.lowStockRow}>
-                          <span>{p.name}</span>
-                          <span style={{ color: "#F0987B" }}>{getProductTotalStock(p)} / mín. {p.minStock} un.</span>
-                        </div>
-                      ))
+            <div style={styles.tagGrid}>
+              {products.map(p => (
+                <div key={p.id} style={styles.productGlassCard}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={styles.categoryBadge}>{p.category}</span>
+                    {getProductTotalStock(p) <= p.minStock && (
+                      <span style={styles.stockLowBadge}>Stock Crítico</span>
                     )}
                   </div>
-                  <div style={styles.panel}>
-                    <h3 style={styles.panelTitle}>Bodegas Operativas</h3>
-                    {locations.map(l => (
-                      <div key={l.id} style={styles.lowStockRow}>
-                        <span>{l.name}</span>
-                        <span style={{ color: "#7FD9C4" }}>Activa</span>
-                      </div>
-                    ))}
-                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 700, margin: "10px 0 2px", color: "#F8FAFC" }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: "monospace" }}>SKU: {p.sku}</div>
+                  <div style={styles.cardDivider}></div>
+                  <div style={styles.tagRow}><span>Precio Venta:</span><strong style={{ color: "#34D399" }}>{money(p.salePrice)}</strong></div>
+                  <div style={styles.tagRow}><span>Costo Unitario:</span><span>{money(p.costPrice)}</span></div>
+                  <div style={styles.tagRow}><span>Stock Global:</span><strong style={{ color: "#38BDF8" }}>{getProductTotalStock(p)} un.</strong></div>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
+          </div>
+        )}
 
-            {tab === "inventario" && (
+        {tab === "bodegas" && canAccessWarehouses && (
+          <div>
+            <div style={styles.pageHeader}>
               <div>
-                <div style={styles.pageHeader}>
-                  <div>
-                    <div style={styles.eyebrow}>INVENTARIO GLOBAL</div>
-                    <h2 style={styles.pageTitle}>Catálogo y Fichas de Bodega</h2>
+                <div style={styles.eyebrow}>LOGÍSTICA MULTI-BODEGA</div>
+                <h2 style={styles.pageTitle}>Distribución de Stock por Almacén</h2>
+              </div>
+            </div>
+            <div style={styles.dashGrid}>
+              {locations.map(loc => (
+                <div key={loc.id} style={styles.panel}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                    <Icon name="building-2" size={18} color="#34D399" />
+                    <h3 style={{ color: "#F1F5F9", margin: 0, fontSize: 16 }}>{loc.name}</h3>
                   </div>
-                </div>
-                <div style={styles.tagGrid}>
                   {products.map(p => (
-                    <div key={p.id} style={styles.tag}>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ fontSize: 10, color: "#8A7A4E", fontWeight: 700, textTransform: "uppercase" }}>{p.category}</span>
-                        {getProductTotalStock(p) <= p.minStock && <span style={{ background: "#F0997B", color: "#4A1B0C", fontSize: 10, padding: "2px 5px", borderRadius: 4, fontWeight: 700 }}>Stock Bajo</span>}
-                      </div>
-                      <div style={{ fontSize: 15, fontWeight: 700, margin: "6px 0 2px" }}>{p.name}</div>
-                      <div style={{ fontSize: 11, color: "#8A7A4E", fontFamily: "monospace" }}>SKU: {p.sku}</div>
-                      <div style={{ borderTop: "1px dashed #C9C2AC", margin: "8px 0" }}></div>
-                      <div style={styles.tagRow}><span>Precio Venta:</span><strong>{money(p.salePrice)}</strong></div>
-                      <div style={styles.tagRow}><span>Costo Unit.:</span><span>{money(p.costPrice)}</span></div>
-                      <div style={styles.tagRow}><span>Stock Total:</span><strong style={{ color: "#1E3A34" }}>{getProductTotalStock(p)} un.</strong></div>
+                    <div key={p.id} style={styles.listRow}>
+                      <span style={{ color: "#CBD5E1" }}>{p.name}</span>
+                      <strong style={{ color: "#38BDF8" }}>{p.stockByLocation?.[loc.id] || 0} un.</strong>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {tab === "bodegas" && canAccessWarehouses && (
-              <div>
-                <div style={styles.pageHeader}>
-                  <div>
-                    <div style={styles.eyebrow}>LOGÍSTICA</div>
-                    <h2 style={styles.pageTitle}>Distribución de Stock por Almacén</h2>
-                  </div>
-                </div>
-                <div style={styles.dashGrid}>
-                  {locations.map(loc => (
-                    <div key={loc.id} style={styles.panel}>
-                      <h3 style={{ color: "#0c4f1c", margin: "0 0 12px 0", fontSize: 16 }}>{loc.name}</h3>
-                      {products.map(p => (
-                        <div key={p.id} style={styles.lowStockRow}>
-                          <span>{p.name}</span>
-                          <strong style={{ color: "#EDEAE1" }}>{p.stockByLocation?.[loc.id] || 0} un.</strong>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {tab === "ventas" && canAccessSales && (
-              <div>
-                <div style={styles.pageHeader}>
-                  <div>
-                    <div style={styles.eyebrow}>PUNTO DE VENTA</div>
-                    <h2 style={styles.pageTitle}>Registro y Modificación de Ventas</h2>
-                  </div>
-                  <button style={styles.primaryBtn} onClick={() => setSaleModalState("new")}>
-                    <Icon name="plus" size={14} /> Registrar Venta
-                  </button>
-                </div>
-                <div style={styles.panel}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", color: "#EDEAE1", fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ color: "#8B93A0", textAlign: "left", borderBottom: "1px solid #232C37" }}>
-                        <th style={{ padding: 10 }}>Fecha</th>
-                        <th>Cliente</th>
-                        <th>Detalle / Concepto</th>
-                        <th>Medio de Pago</th>
-                        <th>Total</th>
-                        <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sales.length === 0 ? (
-                        <tr>
-                          <td colSpan="6" style={{ padding: 16, textAlign: "center", color: "#6B7480" }}>
-                            No hay ventas registradas. Haz clic en "Registrar Venta".
-                          </td>
-                        </tr>
-                      ) : (
-                        sales.map(s => (
-                          <tr key={s.id} style={{ borderBottom: "1px solid #232C37" }}>
-                            <td style={{ padding: 10 }}>{s.date}</td>
-                            <td style={{ fontWeight: 600 }}>{s.customerName}</td>
-                            <td style={{ color: "#8B93A0" }}>{s.details || "Venta general"}</td>
-                            <td><span style={styles.badgeGray}>{s.paymentMethod}</span></td>
-                            <td style={{ color: "#7FD9C4", fontWeight: 700 }}>{money(s.total)}</td>
-                            <td style={{ textAlign: "right", paddingRight: 10 }}>
-                              <button
-                                style={styles.actionIconBtn}
-                                onClick={() => setSaleModalState(s)}
-                                title="Modificar venta"
-                              >
-                                <Icon name="pencil" size={14} color="#0c4f1c" />
-                              </button>
-                              <button
-                                style={styles.actionIconBtn}
-                                onClick={() => handleDeleteSale(s.id)}
-                                title="Eliminar venta"
-                              >
-                                <Icon name="trash-2" size={14} color="#F0987B" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {tab === "usuarios" && canAccessFinances && (
-              <UsersManager users={users} onAddUser={(u) => setUsers(prev => [...prev, u])} />
-            )}
-          </main>
-
-          {/* Modal para Modificar / Crear Venta */}
-          {saleModalState && (
-            <SaleModal
-              sale={saleModalState === "new" ? null : saleModalState}
-              onClose={() => setSaleModalState(null)}
-              onSave={handleSaveSale}
-            />
-          )}
-        </div>
-      );
-    }
-
-    // Modal de Modificación / Creación de Ventas
-    function SaleModal({ sale, onClose, onSave }) {
-      const [customerName, setCustomerName] = useState(sale?.customerName || "");
-      const [details, setDetails] = useState(sale?.details || "");
-      const [paymentMethod, setPaymentMethod] = useState(sale?.paymentMethod || "Efectivo");
-      const [total, setTotal] = useState(sale?.total || 0);
-      const [date, setDate] = useState(sale?.date || new Date().toISOString().slice(0, 10));
-
-      const handleSubmit = (e) => {
-        e.preventDefault();
-        if (!customerName.trim() || Number(total) <= 0) return;
-        onSave({
-          customerName: customerName.trim(),
-          details: details.trim(),
-          paymentMethod,
-          total: Number(total),
-          date
-        });
-      };
-
-      return (
-        <div style={styles.overlay} onClick={onClose}>
-          <div style={styles.modal} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: "0 0 14px", color: "#EDEAE1" }}>
-              {sale ? "Modificar Venta" : "Registrar Nueva Venta"}
-            </h3>
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div>
-                <label style={styles.inputLabel}>Cliente</label>
-                <input
-                  style={styles.input}
-                  value={customerName}
-                  onChange={e => setCustomerName(e.target.value)}
-                  placeholder="Ej: Carlos Soto / Consumidor Final"
-                  required
-                />
-              </div>
-
-              <div>
-                <label style={styles.inputLabel}>Detalle o Concepto</label>
-                <input
-                  style={styles.input}
-                  value={details}
-                  onChange={e => setDetails(e.target.value)}
-                  placeholder="Ej: 2x Poleras, 1x Gorra"
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div>
-                  <label style={styles.inputLabel}>Medio de Pago</label>
-                  <select style={styles.input} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
-                    <option value="Efectivo">Efectivo</option>
-                    <option value="Tarjeta Débito">Tarjeta Débito</option>
-                    <option value="Tarjeta Crédito">Tarjeta Crédito</option>
-                    <option value="Transferencia">Transferencia</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={styles.inputLabel}>Total Venta ($)</label>
-                  <input
-                    style={styles.input}
-                    type="number"
-                    min="1"
-                    value={total}
-                    onChange={e => setTotal(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={styles.inputLabel}>Fecha</label>
-                <input
-                  style={styles.input}
-                  type="date"
-                  value={date}
-                  onChange={e => setDate(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
-                <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-                <button type="submit" style={styles.primaryBtn}>
-                  {sale ? "Guardar Cambios" : "Guardar Venta"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      );
-    }
-
-    function AuthScreen({ onLogin, onRegister, users }) {
-      const [isRegister, setIsRegister] = useState(false);
-      const [email, setEmail] = useState("admin@negocio.cl");
-      const [pass, setPass] = useState("123");
-      const [name, setName] = useState("");
-      const [role, setRole] = useState("Vendedor");
-      const [error, setError] = useState("");
-
-      const handleSubmit = (e) => {
-        e.preventDefault();
-        setError("");
-
-        if (isRegister) {
-          if (!name.trim() || !email.trim() || !pass.trim()) {
-            setError("Todos los campos son obligatorios.");
-            return;
-          }
-          if (users.some(u => u.email.toLowerCase() === email.trim().toLowerCase())) {
-            setError("Ya existe un usuario registrado con este correo.");
-            return;
-          }
-          const newUser = { id: "u-" + Date.now(), name: name.trim(), email: email.trim(), pass, role };
-          onRegister(newUser);
-        } else {
-          const userFound = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase() && u.pass === pass);
-          if (userFound) {
-            onLogin(userFound);
-          } else {
-            setError("Credenciales incorrectas. Verifica correo y contraseña.");
-          }
-        }
-      };
-
-      const setDemo = (userEmail) => {
-        const u = users.find(x => x.email === userEmail);
-        if (u) {
-          setEmail(u.email);
-          setPass(u.pass);
-        }
-      };
-
-      return (
-        <div style={styles.authContainer}>
-          <div style={styles.authCard}>
-            <div style={{ textAlign: "center", marginBottom: 22 }}>
-              <div style={styles.authLogo}>PRO</div>
-              <h2 style={{ color: "#EDEAE1", margin: "10px 0 4px", fontSize: 22 }}>Almacén PRO</h2>
-              <p style={{ color: "#8B93A0", fontSize: 13, margin: 0 }}>Control Multi-Bodega & Gestión Comercial</p>
+              ))}
             </div>
+          </div>
+        )}
 
-            <div style={styles.authTabs}>
-              <button
-                type="button"
-                style={{ ...styles.authTabBtn, ...(isRegister ? {} : styles.authTabActive) }}
-                onClick={() => { setIsRegister(false); setError(""); }}
-              >
-                Iniciar Sesión
-              </button>
-              <button
-                type="button"
-                style={{ ...styles.authTabBtn, ...(isRegister ? styles.authTabActive : {}) }}
-                onClick={() => { setIsRegister(true); setError(""); }}
-              >
-                Crear Cuenta
+        {tab === "ventas" && canAccessSales && (
+          <div>
+            <div style={styles.pageHeader}>
+              <div>
+                <div style={styles.eyebrow}>PUNTO DE VENTA & CAJA</div>
+                <h2 style={styles.pageTitle}>Registro de Ventas Comerciales</h2>
+              </div>
+              <button style={styles.primaryBtn} onClick={() => setSaleModalState("new")}>
+                <Icon name="plus" size={14} /> Registrar Venta
               </button>
             </div>
-
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {isRegister && (
-                <div>
-                  <label style={styles.inputLabel}>Nombre completo</label>
-                  <input
-                    style={styles.input}
-                    placeholder="Ej: Juan Pérez"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
-              )}
-
-              <div>
-                <label style={styles.inputLabel}>Correo electrónico</label>
-                <input
-                  style={styles.input}
-                  type="email"
-                  placeholder="usuario@negocio.cl"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div>
-                <label style={styles.inputLabel}>Contraseña</label>
-                <input
-                  style={styles.input}
-                  type="password"
-                  placeholder="••••••••"
-                  value={pass}
-                  onChange={(e) => setPass(e.target.value)}
-                  required
-                />
-              </div>
-
-              {isRegister && (
-                <div>
-                  <label style={styles.inputLabel}>Rol en el negocio</label>
-                  <select style={styles.input} value={role} onChange={(e) => setRole(e.target.value)}>
-                    <option value="Administrador">Administrador (Acceso total)</option>
-                    <option value="Bodeguero">Bodeguero (Inventario y transferencias)</option>
-                    <option value="Vendedor">Vendedor (Punto de venta y catálogo)</option>
-                  </select>
-                </div>
-              )}
-
-              {error && <div style={styles.errorMsg}>{error}</div>}
-
-              <button type="submit" style={styles.submitBtn}>
-                {isRegister ? "Registrar e Ingresar" : "Entrar al Sistema"}
-              </button>
-            </form>
-
-            {!isRegister && (
-              <div style={styles.demoSection}>
-                <span style={{ fontSize: 11, color: "#8B93A0" }}>Ingreso rápido de prueba:</span>
-                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("admin@negocio.cl")}>Admin</button>
-                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("bodega@negocio.cl")}>Bodega</button>
-                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("ventas@negocio.cl")}>Ventas</button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
-
-    function UsersManager({ users, onAddUser }) {
-      const [modal, setModal] = useState(false);
-      const [name, setName] = useState("");
-      const [email, setEmail] = useState("");
-      const [pass, setPass] = useState("");
-      const [role, setRole] = useState("Vendedor");
-
-      const handleCreate = (e) => {
-        e.preventDefault();
-        if (!name || !email || !pass) return;
-        onAddUser({ id: "u-" + Date.now(), name, email, pass, role });
-        setName(""); setEmail(""); setPass(""); setModal(false);
-      };
-
-      return (
-        <div>
-          <div style={styles.pageHeader}>
-            <div>
-              <div style={styles.eyebrow}>ADMINISTRACIÓN</div>
-              <h2 style={styles.pageTitle}>Cuentas y Accesos de Personal</h2>
-            </div>
-            <button style={styles.primaryBtn} onClick={() => setModal(true)}>+ Agregar Miembro</button>
-          </div>
-
-          <div style={styles.panel}>
-            <table style={{ width: "100%", borderCollapse: "collapse", color: "#EDEAE1", fontSize: 13 }}>
-              <thead>
-                <tr style={{ color: "#8B93A0", textAlign: "left", borderBottom: "1px solid #232C37" }}>
-                  <th style={{ padding: 10 }}>Nombre</th>
-                  <th>Correo</th>
-                  <th>Rol asignado</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map(u => (
-                  <tr key={u.id} style={{ borderBottom: "1px solid #232C37" }}>
-                    <td style={{ padding: 10, fontWeight: 600 }}>{u.name}</td>
-                    <td style={{ color: "#8B93A0" }}>{u.email}</td>
-                    <td><span style={styles.badgeGreenTag}>{u.role}</span></td>
-                    <td><span style={{ color: "#7FD9C4", fontSize: 12 }}>● Activo</span></td>
+            <div style={styles.panel}>
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeaderRow}>
+                    <th style={{ padding: "12px 10px" }}>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Detalle / Concepto</th>
+                    <th>Medio de Pago</th>
+                    <th>Total</th>
+                    <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {modal && (
-            <div style={styles.overlay} onClick={() => setModal(false)}>
-              <div style={styles.modal} onClick={e => e.stopPropagation()}>
-                <h3 style={{ margin: "0 0 14px", color: "#EDEAE1" }}>Crear Cuenta de Personal</h3>
-                <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div>
-                    <label style={styles.inputLabel}>Nombre</label>
-                    <input style={styles.input} value={name} onChange={e => setName(e.target.value)} required />
-                  </div>
-                  <div>
-                    <label style={styles.inputLabel}>Correo</label>
-                    <input style={styles.input} type="email" value={email} onChange={e => setEmail(e.target.value)} required />
-                  </div>
-                  <div>
-                    <label style={styles.inputLabel}>Contraseña provisional</label>
-                    <input style={styles.input} type="password" value={pass} onChange={e => setPass(e.target.value)} required />
-                  </div>
-                  <div>
-                    <label style={styles.inputLabel}>Rol de acceso</label>
-                    <select style={styles.input} value={role} onChange={e => setRole(e.target.value)}>
-                      <option value="Administrador">Administrador</option>
-                      <option value="Bodeguero">Bodeguero</option>
-                      <option value="Vendedor">Vendedor</option>
-                    </select>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
-                    <button type="button" style={styles.secondaryBtn} onClick={() => setModal(false)}>Cancelar</button>
-                    <button type="submit" style={styles.primaryBtn}>Crear Usuario</button>
-                  </div>
-                </form>
-              </div>
+                </thead>
+                <tbody>
+                  {sales.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                        No hay ventas registradas.
+                      </td>
+                    </tr>
+                  ) : (
+                    sales.map(s => (
+                      <tr key={s.id} style={styles.tableRow}>
+                        <td style={{ padding: 10, color: "#94A3B8" }}>{s.date}</td>
+                        <td style={{ fontWeight: 600, color: "#F8FAFC" }}>{s.customerName}</td>
+                        <td style={{ color: "#94A3B8" }}>{s.details || "Venta general"}</td>
+                        <td><span style={styles.badgeGray}>{s.paymentMethod}</span></td>
+                        <td style={{ color: "#34D399", fontWeight: 700 }}>{money(s.total)}</td>
+                        <td style={{ textAlign: "right", paddingRight: 10 }}>
+                          <button style={styles.actionIconBtn} onClick={() => setSaleModalState(s)} title="Modificar">
+                            <Icon name="pencil" size={14} color="#38BDF8" />
+                          </button>
+                          <button style={styles.actionIconBtn} onClick={() => handleDeleteSale(s.id)} title="Eliminar">
+                            <Icon name="trash-2" size={14} color="#F87171" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
-      );
+          </div>
+        )}
+
+        {tab === "clientes" && canAccessCustomers && (
+          <ClientesManager
+            customers={customers}
+            sales={sales}
+            onNew={() => setCustomerModalState("new")}
+            onEdit={(c) => setCustomerModalState(c)}
+            onDelete={handleDeleteCustomer}
+          />
+        )}
+
+        {tab === "gastos" && canAccessFinances && (
+          <GastosManager
+            expenses={expenses}
+            totalExpenses={totalExpenses}
+            onNew={() => setExpenseModalState("new")}
+            onEdit={(e) => setExpenseModalState(e)}
+            onDelete={handleDeleteExpense}
+          />
+        )}
+
+        {tab === "usuarios" && (role === "Administrador") && (
+          <UsersManager users={users} onAddUser={(u) => setUsers(prev => [...prev, u])} />
+        )}
+      </main>
+
+      {/* Modales */}
+      {saleModalState && (
+        <SaleModal
+          sale={saleModalState === "new" ? null : saleModalState}
+          customers={customers}
+          onClose={() => setSaleModalState(null)}
+          onSave={handleSaveSale}
+        />
+      )}
+
+      {expenseModalState && (
+        <ExpenseModal
+          expense={expenseModalState === "new" ? null : expenseModalState}
+          onClose={() => setExpenseModalState(null)}
+          onSave={handleSaveExpense}
+        />
+      )}
+
+      {customerModalState && (
+        <CustomerModal
+          customer={customerModalState === "new" ? null : customerModalState}
+          onClose={() => setCustomerModalState(null)}
+          onSave={handleSaveCustomer}
+        />
+      )}
+
+      {personalModalState && (
+        <PersonalFinanceModal
+          item={personalModalState === "new" ? null : personalModalState}
+          onClose={() => setPersonalModalState(null)}
+          onSave={handleSavePersonalFinance}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============ DASHBOARD PRINCIPAL CON DOBLE PANEL (NEGOCIO + PERSONAL) ============
+function Dashboard({ 
+  currentUser, canAccessSales, canAccessPersonal, sales, expenses, products, lowStock, locations, customers, 
+  totalSales, totalExpenses, profit, personalFinances, personalIncome, personalExpense, personalBalance,
+  onNewSale, onNewPersonal, onGoToPersonal 
+}) {
+  const trendCanvasRef = useRef(null);
+  const expenseCanvasRef = useRef(null);
+  const chartRefs = useRef({ trend: null, expense: null });
+
+  const last7Days = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+    return days;
+  }, []);
+
+  const salesByDay = useMemo(() => {
+    return last7Days.map(day => sales.filter(s => s.date === day).reduce((a, s) => a + Number(s.total || 0), 0));
+  }, [sales, last7Days]);
+
+  const expensesByDay = useMemo(() => {
+    return last7Days.map(day => expenses.filter(e => e.date === day).reduce((a, e) => a + Number(e.amount || 0), 0));
+  }, [expenses, last7Days]);
+
+  const expensesByCategory = useMemo(() => {
+    const map = {};
+    expenses.forEach(e => { map[e.category] = (map[e.category] || 0) + Number(e.amount || 0); });
+    return map;
+  }, [expenses]);
+
+  useEffect(() => {
+    if (!window.Chart) return;
+
+    if (chartRefs.current.trend) chartRefs.current.trend.destroy();
+    if (trendCanvasRef.current) {
+      chartRefs.current.trend = new window.Chart(trendCanvasRef.current, {
+        type: "line",
+        data: {
+          labels: last7Days.map(d => d.slice(5)),
+          datasets: [
+            { 
+              label: "Ventas Negocio", 
+              data: salesByDay, 
+              borderColor: "#34D399", 
+              backgroundColor: "rgba(52, 211, 153, 0.15)", 
+              borderWidth: 2.5,
+              tension: 0.35, 
+              fill: true 
+            },
+            { 
+              label: "Gastos Negocio", 
+              data: expensesByDay, 
+              borderColor: "#F87171", 
+              backgroundColor: "rgba(248, 113, 113, 0.1)", 
+              borderWidth: 2,
+              tension: 0.35, 
+              fill: true 
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: "#CBD5E1", font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { color: "#64748B", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } },
+            y: { ticks: { color: "#64748B", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } }
+          }
+        }
+      });
     }
 
-    const styles = {
-      app: { display: "flex", minHeight: "92vh", background: "#12181F", color: "#EDEAE1", borderRadius: 12, overflow: "hidden", border: "1px solid #232C37" },
-      sidebar: { width: 230, background: "#0E141B", padding: "18px 14px", display: "flex", flexDirection: "column", borderRight: "1px solid #232C37" },
-      brand: { display: "flex", alignItems: "center", gap: 10, paddingBottom: 14, borderBottom: "1px solid #232C37" },
-      brandMark: { width: 34, height: 34, borderRadius: 8, background: "#0c4f1c", color: "#EDEAE1", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13 },
-      brandTitle: { fontWeight: 700, fontSize: 14.5, color: "#EDEAE1" },
-      brandSub: { color: "#6B7480", fontSize: 10.5 },
-      
-      userCard: { display: "flex", alignItems: "center", gap: 9, background: "#1B232D", padding: "8px 10px", borderRadius: 8, margin: "14px 0 10px", border: "1px solid #232C37" },
-      userAvatar: { width: 30, height: 30, borderRadius: "50%", background: "#0c4f1c", color: "#EDEAE1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 },
-      userName: { fontSize: 12.5, fontWeight: 600, color: "#EDEAE1", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-      roleBadge: { fontSize: 9.5, color: "#7FD9C4", textTransform: "uppercase", letterSpacing: "0.04em", display: "block" },
-      logoutBtn: { background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" },
+    if (chartRefs.current.expense) chartRefs.current.expense.destroy();
+    if (expenseCanvasRef.current) {
+      const labels = Object.keys(expensesByCategory);
+      const data = Object.values(expensesByCategory);
+      chartRefs.current.expense = new window.Chart(expenseCanvasRef.current, {
+        type: "doughnut",
+        data: {
+          labels: labels.length ? labels : ["Sin gastos"],
+          datasets: [{
+            data: data.length ? data : [1],
+            backgroundColor: ["#10B981", "#38BDF8", "#F87171", "#FBBF24", "#A78BFA", "#EC4899", "#64748B"],
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.1)"
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom", labels: { color: "#CBD5E1", font: { size: 10 }, boxWidth: 10 } } }
+        }
+      });
+    }
 
-      nav: { display: "flex", flexDirection: "column", gap: 4, flex: 1, marginTop: 6 },
-      navItem: { display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 6, background: "transparent", border: "none", color: "#9AA2AE", fontSize: 13, cursor: "pointer", textAlign: "left" },
-      navItemActive: { background: "#1B232D", color: "#EDEAE1", fontWeight: 600 },
-      navBadge: { marginLeft: "auto", background: "#E1613D", color: "#FFF", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10 },
-      footerStatus: { color: "#6B7480", fontSize: 10.5, padding: "10px 4px 0", borderTop: "1px solid #232C37", display: "flex", alignItems: "center", gap: 6 },
-
-      main: { flex: 1, padding: "26px 30px", overflowY: "auto" },
-      pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-      eyebrow: { color: "#0c4f1c", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em" },
-      pageTitle: { margin: "2px 0 0", fontSize: 21 },
-      
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 20 },
-      kpiCard: { background: "#1B232D", border: "1px solid #232C37", borderRadius: 8, padding: "14px 16px" },
-      kpiLabel: { color: "#8B93A0", fontSize: 12 },
-      kpiValue: { fontSize: 19, fontWeight: 700, marginTop: 6 },
-      
-      dashGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
-      panel: { background: "#1B232D", border: "1px solid #232C37", borderRadius: 8, padding: "16px 18px" },
-      panelTitle: { margin: "0 0 12px 0", fontSize: 14, color: "#EDEAE1" },
-      lowStockRow: { display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #232C37", fontSize: 13 },
-      
-      tagGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 14 },
-      tag: { background: "#F3EFE4", color: "#2B2A22", borderRadius: 8, padding: 14 },
-      tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12, margin: "3px 0", color: "#4A4636" },
-      
-      primaryBtn: { background: "#0c4f1c", color: "#EDEAE1", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 },
-      secondaryBtn: { background: "transparent", color: "#EDEAE1", border: "1px solid #2E3844", borderRadius: 6, padding: "8px 14px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
-      actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px" },
-      
-      badgeGreenTag: { background: "#0c4f1c", color: "#EDEAE1", padding: "2px 7px", borderRadius: 4, fontSize: 11, fontWeight: 600 },
-      badgeGray: { background: "#232C37", color: "#8B93A0", padding: "2px 7px", borderRadius: 4, fontSize: 11 },
-
-      // Pantalla de Autenticación
-      authContainer: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "85vh" },
-      authCard: { background: "#12181F", border: "1px solid #232C37", borderRadius: 12, padding: "28px 30px", width: "100%", maxWidth: 400 },
-      authLogo: { width: 44, height: 44, borderRadius: 10, background: "#0c4f1c", color: "#EDEAE1", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 },
-      authTabs: { display: "flex", background: "#0E141B", padding: 3, borderRadius: 8, marginBottom: 18, border: "1px solid #232C37" },
-      authTabBtn: { flex: 1, padding: "8px 0", background: "none", border: "none", color: "#8B93A0", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 6 },
-      authTabActive: { background: "#0c4f1c", color: "#EDEAE1" },
-      inputLabel: { display: "block", color: "#8B93A0", fontSize: 11.5, marginBottom: 5 },
-      input: { background: "#0E141B", border: "1px solid #2E3844", borderRadius: 6, padding: "9px 12px", color: "#EDEAE1", fontSize: 13, width: "100%" },
-      submitBtn: { background: "#0c4f1c", color: "#EDEAE1", border: "none", borderRadius: 6, padding: "10px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 6 },
-      errorMsg: { background: "#3A1F17", color: "#F0987B", padding: "8px 10px", borderRadius: 6, fontSize: 12 },
-      demoSection: { marginTop: 18, paddingTop: 14, borderTop: "1px solid #232C37", textAlign: "center" },
-      quickDemoBtn: { background: "#1B232D", border: "1px solid #2E3844", color: "#EDEAE1", padding: "4px 10px", borderRadius: 5, fontSize: 11, cursor: "pointer", flex: 1 },
-
-      overlay: { position: "fixed", inset: 0, background: "rgba(10,14,18,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 },
-      modal: { background: "#1B232D", border: "1px solid #2E3844", borderRadius: 10, padding: 20, width: "100%", maxWidth: 460 }
+    return () => {
+      if (chartRefs.current.trend) chartRefs.current.trend.destroy();
+      if (chartRefs.current.expense) chartRefs.current.expense.destroy();
     };
+  }, [salesByDay, expensesByDay, expensesByCategory, last7Days]);
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-  </script>
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <div>
+          <div style={styles.eyebrow}>RESUMEN INTEGRAL & CONTROL</div>
+          <h2 style={styles.pageTitle}>Bienvenido, {currentUser.name} ✨</h2>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          {canAccessPersonal && (
+            <button style={styles.purpleBtn} onClick={onNewPersonal}>
+              <Icon name="plus" size={14} /> Movimiento Personal
+            </button>
+          )}
+          {canAccessSales && (
+            <button style={styles.primaryBtn} onClick={onNewSale}>
+              <Icon name="shopping-bag" size={14} /> Registrar Venta
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* SECCIÓN 1: FINANZAS DEL NEGOCIO */}
+      <div style={styles.sectionHeader}>
+        <Icon name="briefcase" size={17} color="#34D399" />
+        <span style={styles.sectionTitle}>Finanzas & Operación del Negocio</span>
+      </div>
+
+      <div style={styles.kpiGrid}>
+        <div style={styles.kpiCard}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={styles.kpiLabel}>Ventas del Negocio</span>
+            <Icon name="trending-up" size={15} color="#34D399" />
+          </div>
+          <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(totalSales)}</div>
+          <span style={styles.kpiSub}>Ingresos totales por ventas</span>
+        </div>
+
+        <div style={styles.kpiCard}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={styles.kpiLabel}>Gastos Operativos</span>
+            <Icon name="trending-down" size={15} color="#F87171" />
+          </div>
+          <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(totalExpenses)}</div>
+          <span style={styles.kpiSub}>Arriendo, insumos y compras</span>
+        </div>
+
+        <div style={styles.kpiCard}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={styles.kpiLabel}>Utilidad Neta (Negocio)</span>
+            <Icon name="dollar-sign" size={15} color={profit >= 0 ? "#38BDF8" : "#F87171"} />
+          </div>
+          <div style={{ ...styles.kpiValue, color: profit >= 0 ? "#38BDF8" : "#F87171" }}>{money(profit)}</div>
+          <span style={styles.kpiSub}>Margen bruto - costos</span>
+        </div>
+
+        <div style={styles.kpiCard}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={styles.kpiLabel}>Catálogo & Alertas</span>
+            <Icon name="package-check" size={15} color="#FBBF24" />
+          </div>
+          <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{products.length} <span style={{ fontSize: 13, color: "#94A3B8" }}>prods.</span></div>
+          <span style={{ ...styles.kpiSub, color: lowStock.length > 0 ? "#F87171" : "#34D399" }}>
+            {lowStock.length > 0 ? `⚠️ ${lowStock.length} con stock bajo` : "✓ Stock en óptimo estado"}
+          </span>
+        </div>
+      </div>
+
+      <div style={styles.dashGrid}>
+        <div style={styles.panel}>
+          <div style={styles.panelTitleRow}>
+            <h3 style={styles.panelTitle}>Rendimiento Comercial (Últimos 7 días)</h3>
+            <span style={styles.badgeGlass}>Flujo Negocio</span>
+          </div>
+          <div style={{ height: 210 }}>
+            <canvas ref={trendCanvasRef}></canvas>
+          </div>
+        </div>
+
+        <div style={styles.panel}>
+          <div style={styles.panelTitleRow}>
+            <h3 style={styles.panelTitle}>Distribución de Costos del Negocio</h3>
+            <span style={styles.badgeGlass}>Por Categoría</span>
+          </div>
+          <div style={{ height: 210 }}>
+            <canvas ref={expenseCanvasRef}></canvas>
+          </div>
+        </div>
+      </div>
+
+      {/* SECCIÓN 2: ESPACIO & FINANZAS PERSONALES */}
+      {canAccessPersonal && (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ ...styles.sectionHeader, borderLeftColor: "#A855F7" }}>
+            <Icon name="wallet" size={17} color="#C084FC" />
+            <span style={{ ...styles.sectionTitle, color: "#E9D5FF" }}>Espacio de Cosas Personales & Finanzas</span>
+            <button onClick={onGoToPersonal} style={styles.linkGlassBtn}>
+              Ver historial completo &rarr;
+            </button>
+          </div>
+
+          <div style={styles.kpiGrid}>
+            <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={styles.kpiLabel}>Ingresos Personales</span>
+                <Icon name="arrow-down-left" size={15} color="#34D399" />
+              </div>
+              <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(personalIncome)}</div>
+              <span style={styles.kpiSub}>Retiros de negocio y freelance</span>
+            </div>
+
+            <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={styles.kpiLabel}>Gastos Personales</span>
+                <Icon name="arrow-up-right" size={15} color="#F87171" />
+              </div>
+              <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(personalExpense)}</div>
+              <span style={styles.kpiSub}>Gastos diarios, comida y ocio</span>
+            </div>
+
+            <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={styles.kpiLabel}>Saldo Disponible Personal</span>
+                <Icon name="piggy-bank" size={16} color="#C084FC" />
+              </div>
+              <div style={{ ...styles.kpiValue, color: personalBalance >= 0 ? "#C084FC" : "#F87171" }}>
+                {money(personalBalance)}
+              </div>
+              <span style={styles.kpiSub}>Balance neto en bolsillo</span>
+            </div>
+          </div>
+
+          <div style={styles.dashGrid}>
+            <div style={styles.panel}>
+              <div style={styles.panelTitleRow}>
+                <h3 style={styles.panelTitle}>Últimos Movimientos Personales</h3>
+                <button style={styles.smallGlassBtn} onClick={onNewPersonal}>+ Agregar</button>
+              </div>
+              {personalFinances.length === 0 ? (
+                <p style={{ color: "#64748B", fontSize: 13 }}>No has registrado movimientos personales aún.</p>
+              ) : (
+                personalFinances.slice(0, 4).map(item => (
+                  <div key={item.id} style={styles.listRow}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#F1F5F9" }}>{item.description || item.category}</div>
+                      <span style={{ fontSize: 11, color: "#94A3B8" }}>{item.date} • {item.category}</span>
+                    </div>
+                    <strong style={{ color: item.type === "ingreso" ? "#34D399" : "#F87171", fontSize: 13 }}>
+                      {item.type === "ingreso" ? "+" : "-"}{money(item.amount)}
+                    </strong>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={styles.panel}>
+              <div style={styles.panelTitleRow}>
+                <h3 style={styles.panelTitle}>Recordatorios & Cosas Personales</h3>
+                <span style={styles.badgeGlass}>Notas Rápidas</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={styles.glassNote}>
+                  <Icon name="check-circle-2" size={15} color="#34D399" />
+                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Separar el 20% de las ventas semanales para ahorro personal.</span>
+                </div>
+                <div style={styles.glassNote}>
+                  <Icon name="clock" size={15} color="#FBBF24" />
+                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Revisar pagos de servicios básicos antes de fin de mes.</span>
+                </div>
+                <div style={styles.glassNote}>
+                  <Icon name="sparkles" size={15} color="#38BDF8" />
+                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Las finanzas del negocio y personales se mantienen independientes.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ MÓDULO DEDICADO: FINANZAS & ESPACIO PERSONAL ============
+function PersonalFinancesManager({ personalFinances, income, expense, balance, onNew, onEdit, onDelete }) {
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <div>
+          <div style={{ ...styles.eyebrow, color: "#C084FC" }}>GESTIÓN INDEPENDIENTE</div>
+          <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳</h2>
+        </div>
+        <button style={styles.purpleBtn} onClick={onNew}>
+          <Icon name="plus" size={14} /> Registrar Movimiento
+        </button>
+      </div>
+
+      <div style={styles.kpiGrid}>
+        <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
+          <span style={styles.kpiLabel}>Ingresos Registrados</span>
+          <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(income)}</div>
+        </div>
+        <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
+          <span style={styles.kpiLabel}>Gastos Registrados</span>
+          <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(expense)}</div>
+        </div>
+        <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
+          <span style={styles.kpiLabel}>Saldo Personal Neto</span>
+          <div style={{ ...styles.kpiValue, color: balance >= 0 ? "#C084FC" : "#F87171" }}>{money(balance)}</div>
+        </div>
+        <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
+          <span style={styles.kpiLabel}>Total de Movimientos</span>
+          <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{personalFinances.length}</div>
+        </div>
+      </div>
+
+      <div style={styles.panel}>
+        <table style={styles.table}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={{ padding: "12px 10px" }}>Fecha</th>
+              <th>Tipo</th>
+              <th>Categoría</th>
+              <th>Descripción</th>
+              <th>Monto</th>
+              <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {personalFinances.length === 0 ? (
+              <tr>
+                <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                  Aún no tienes movimientos personales registrados. Haz clic en "Registrar Movimiento".
+                </td>
+              </tr>
+            ) : (
+              personalFinances.map(item => (
+                <tr key={item.id} style={styles.tableRow}>
+                  <td style={{ padding: 10, color: "#94A3B8" }}>{item.date}</td>
+                  <td>
+                    <span style={item.type === "ingreso" ? styles.badgeGreen : styles.badgeRed}>
+                      {item.type === "ingreso" ? "Ingreso" : "Gasto"}
+                    </span>
+                  </td>
+                  <td style={{ color: "#E2E8F0" }}>{item.category}</td>
+                  <td style={{ color: "#94A3B8" }}>{item.description || "-"}</td>
+                  <td style={{ fontWeight: 700, color: item.type === "ingreso" ? "#34D399" : "#F87171" }}>
+                    {item.type === "ingreso" ? "+" : "-"}{money(item.amount)}
+                  </td>
+                  <td style={{ textAlign: "right", paddingRight: 10 }}>
+                    <button style={styles.actionIconBtn} onClick={() => onEdit(item)} title="Editar">
+                      <Icon name="pencil" size={14} color="#C084FC" />
+                    </button>
+                    <button style={styles.actionIconBtn} onClick={() => onDelete(item.id)} title="Eliminar">
+                      <Icon name="trash-2" size={14} color="#F87171" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============ GESTIÓN DE GASTOS DEL NEGOCIO ============
+function GastosManager({ expenses, totalExpenses, onNew, onEdit, onDelete }) {
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <div>
+          <div style={styles.eyebrow}>CONTROL DE EGRESOS EMPRESARIALES</div>
+          <h2 style={styles.pageTitle}>Registro de Gastos del Negocio</h2>
+        </div>
+        <button style={styles.primaryBtn} onClick={onNew}>
+          <Icon name="plus" size={14} /> Registrar Gasto
+        </button>
+      </div>
+
+      <div style={styles.kpiGrid}>
+        <div style={styles.kpiCard}>
+          <span style={styles.kpiLabel}>Total Gastado Negocio</span>
+          <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(totalExpenses)}</div>
+        </div>
+        <div style={styles.kpiCard}>
+          <span style={styles.kpiLabel}>Comprobantes / Facturas</span>
+          <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{expenses.length}</div>
+        </div>
+      </div>
+
+      <div style={styles.panel}>
+        <table style={styles.table}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={{ padding: "12px 10px" }}>Fecha</th>
+              <th>Categoría</th>
+              <th>Descripción</th>
+              <th>Monto</th>
+              <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {expenses.length === 0 ? (
+              <tr>
+                <td colSpan="5" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                  No hay gastos registrados para el negocio.
+                </td>
+              </tr>
+            ) : (
+              expenses.map(e => (
+                <tr key={e.id} style={styles.tableRow}>
+                  <td style={{ padding: 10, color: "#94A3B8" }}>{e.date}</td>
+                  <td><span style={styles.badgeGray}>{e.category}</span></td>
+                  <td style={{ color: "#94A3B8" }}>{e.description || "-"}</td>
+                  <td style={{ color: "#F87171", fontWeight: 700 }}>{money(e.amount)}</td>
+                  <td style={{ textAlign: "right", paddingRight: 10 }}>
+                    <button style={styles.actionIconBtn} onClick={() => onEdit(e)} title="Modificar">
+                      <Icon name="pencil" size={14} color="#38BDF8" />
+                    </button>
+                    <button style={styles.actionIconBtn} onClick={() => onDelete(e.id)} title="Eliminar">
+                      <Icon name="trash-2" size={14} color="#F87171" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============ GESTIÓN DE CLIENTES ============
+function ClientesManager({ customers, sales, onNew, onEdit, onDelete }) {
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+
+  const customerStats = useMemo(() => {
+    return customers.map(c => {
+      const customerSales = sales.filter(s => s.customerName.toLowerCase() === c.name.toLowerCase());
+      const totalSpent = customerSales.reduce((a, s) => a + Number(s.total || 0), 0);
+      const lastPurchase = customerSales.length ? customerSales.map(s => s.date).sort().reverse()[0] : null;
+      return { ...c, purchaseCount: customerSales.length, totalSpent, lastPurchase };
+    }).sort((a, b) => b.totalSpent - a.totalSpent);
+  }, [customers, sales]);
+
+  useEffect(() => {
+    if (!window.Chart) return;
+    if (chartRef.current) chartRef.current.destroy();
+    if (canvasRef.current) {
+      const top = customerStats.slice(0, 6);
+      chartRef.current = new window.Chart(canvasRef.current, {
+        type: "bar",
+        data: {
+          labels: top.map(c => c.name),
+          datasets: [{ 
+            label: "Total comprado", 
+            data: top.map(c => c.totalSpent), 
+            backgroundColor: "rgba(52, 211, 153, 0.75)",
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: "y",
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: "#64748B", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } },
+            y: { ticks: { color: "#E2E8F0", font: { size: 11 } }, grid: { display: false } }
+          }
+        }
+      });
+    }
+    return () => { if (chartRef.current) chartRef.current.destroy(); };
+  }, [customerStats]);
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <div>
+          <div style={styles.eyebrow}>CRM & CARTERA</div>
+          <h2 style={styles.pageTitle}>Fichas de Clientes e Historial de Compra</h2>
+        </div>
+        <button style={styles.primaryBtn} onClick={onNew}>
+          <Icon name="user-plus" size={14} /> Agregar Cliente
+        </button>
+      </div>
+
+      <div style={styles.panel}>
+        <h3 style={styles.panelTitle}>Top Clientes por Monto Comprado</h3>
+        <div style={{ height: 210 }}>
+          <canvas ref={canvasRef}></canvas>
+        </div>
+      </div>
+
+      <div style={{ ...styles.panel, marginTop: 16 }}>
+        <table style={styles.table}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={{ padding: "12px 10px" }}>Nombre</th>
+              <th>Teléfono</th>
+              <th>N° Compras</th>
+              <th>Total Comprado</th>
+              <th>Última Compra</th>
+              <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {customerStats.length === 0 ? (
+              <tr>
+                <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                  No hay clientes registrados todavía.
+                </td>
+              </tr>
+            ) : (
+              customerStats.map(c => (
+                <tr key={c.id} style={styles.tableRow}>
+                  <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{c.name}</td>
+                  <td style={{ color: "#94A3B8" }}>{c.phone || "-"}</td>
+                  <td><span style={styles.badgeGray}>{c.purchaseCount} ped.</span></td>
+                  <td style={{ color: "#34D399", fontWeight: 700 }}>{money(c.totalSpent)}</td>
+                  <td style={{ color: "#94A3B8" }}>{c.lastPurchase || "-"}</td>
+                  <td style={{ textAlign: "right", paddingRight: 10 }}>
+                    <button style={styles.actionIconBtn} onClick={() => onEdit(c)} title="Modificar">
+                      <Icon name="pencil" size={14} color="#38BDF8" />
+                    </button>
+                    <button style={styles.actionIconBtn} onClick={() => onDelete(c.id)} title="Eliminar">
+                      <Icon name="trash-2" size={14} color="#F87171" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============ MODALES ============
+function SaleModal({ sale, customers, onClose, onSave }) {
+  const [customerName, setCustomerName] = useState(sale?.customerName || "");
+  const [details, setDetails] = useState(sale?.details || "");
+  const [paymentMethod, setPaymentMethod] = useState(sale?.paymentMethod || "Efectivo");
+  const [total, setTotal] = useState(sale?.total || 0);
+  const [date, setDate] = useState(sale?.date || new Date().toISOString().slice(0, 10));
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!customerName.trim() || Number(total) <= 0) return;
+    onSave({ customerName: customerName.trim(), details: details.trim(), paymentMethod, total: Number(total), date });
+  };
+
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+        <h3 style={styles.modalTitle}>{sale ? "Modificar Venta" : "Registrar Nueva Venta"}</h3>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={styles.inputLabel}>Cliente</label>
+            <input style={styles.glassInput} value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Ej: Carlos Soto / Consumidor Final" list="customer-suggestions" required />
+            <datalist id="customer-suggestions">
+              {customers.map(c => <option key={c.id} value={c.name} />)}
+            </datalist>
+          </div>
+          <div>
+            <label style={styles.inputLabel}>Detalle o Concepto</label>
+            <input style={styles.glassInput} value={details} onChange={e => setDetails(e.target.value)} placeholder="Ej: 2x Poleras Oversize" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={styles.inputLabel}>Medio de Pago</label>
+              <select style={styles.glassInput} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                <option value="Efectivo">Efectivo</option>
+                <option value="Tarjeta Débito">Tarjeta Débito</option>
+                <option value="Tarjeta Crédito">Tarjeta Crédito</option>
+                <option value="Transferencia">Transferencia</option>
+              </select>
+            </div>
+            <div>
+              <label style={styles.inputLabel}>Total Venta ($)</label>
+              <input style={styles.glassInput} type="number" min="1" value={total} onChange={e => setTotal(e.target.value)} required />
+            </div>
+          </div>
+          <div>
+            <label style={styles.inputLabel}>Fecha</label>
+            <input style={styles.glassInput} type="date" value={date} onChange={e => setDate(e.target.value)} required />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+            <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+            <button type="submit" style={styles.primaryBtn}>{sale ? "Guardar Cambios" : "Guardar Venta"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ExpenseModal({ expense, onClose, onSave }) {
+  const [category, setCategory] = useState(expense?.category || EXPENSE_CATEGORIES[0]);
+  const [description, setDescription] = useState(expense?.description || "");
+  const [amount, setAmount] = useState(expense?.amount || 0);
+  const [date, setDate] = useState(expense?.date || new Date().toISOString().slice(0, 10));
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (Number(amount) <= 0) return;
+    onSave({ category, description: description.trim(), amount: Number(amount), date });
+  };
+
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+        <h3 style={styles.modalTitle}>{expense ? "Modificar Gasto Negocio" : "Registrar Gasto de Negocio"}</h3>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={styles.inputLabel}>Categoría</label>
+            <select style={styles.glassInput} value={category} onChange={e => setCategory(e.target.value)}>
+              {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={styles.inputLabel}>Descripción</label>
+            <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej: Pago de luz o insumos" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={styles.inputLabel}>Monto ($)</label>
+              <input style={styles.glassInput} type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required />
+            </div>
+            <div>
+              <label style={styles.inputLabel}>Fecha</label>
+              <input style={styles.glassInput} type="date" value={date} onChange={e => setDate(e.target.value)} required />
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+            <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+            <button type="submit" style={styles.primaryBtn}>{expense ? "Guardar Cambios" : "Guardar Gasto"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function CustomerModal({ customer, onClose, onSave }) {
+  const [name, setName] = useState(customer?.name || "");
+  const [phone, setPhone] = useState(customer?.phone || "");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave({ name: name.trim(), phone: phone.trim() });
+  };
+
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+        <h3 style={styles.modalTitle}>{customer ? "Modificar Cliente" : "Agregar Nuevo Cliente"}</h3>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={styles.inputLabel}>Nombre</label>
+            <input style={styles.glassInput} value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Carlos Soto" required />
+          </div>
+          <div>
+            <label style={styles.inputLabel}>Teléfono</label>
+            <input style={styles.glassInput} value={phone} onChange={e => setPhone(e.target.value)} placeholder="Ej: +56 9 1234 5678" />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+            <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+            <button type="submit" style={styles.primaryBtn}>{customer ? "Guardar Cambios" : "Guardar Cliente"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// MODAL PARA MOVIMIENTOS PERSONALES
+function PersonalFinanceModal({ item, onClose, onSave }) {
+  const [type, setType] = useState(item?.type || "gasto");
+  const [category, setCategory] = useState(item?.category || PERSONAL_CATEGORIES[0]);
+  const [description, setDescription] = useState(item?.description || "");
+  const [amount, setAmount] = useState(item?.amount || 0);
+  const [date, setDate] = useState(item?.date || new Date().toISOString().slice(0, 10));
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (Number(amount) <= 0) return;
+    onSave({ type, category, description: description.trim(), amount: Number(amount), date });
+  };
+
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+        <h3 style={{ ...styles.modalTitle, color: "#E9D5FF" }}>
+          {item ? "Modificar Movimiento Personal" : "Nuevo Movimiento Personal 👤"}
+        </h3>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={styles.inputLabel}>Tipo de Movimiento</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button 
+                type="button" 
+                style={{ ...styles.typeTabBtn, ...(type === "ingreso" ? styles.typeTabActiveGreen : {}) }}
+                onClick={() => setType("ingreso")}
+              >
+                + Ingreso / Retiro
+              </button>
+              <button 
+                type="button" 
+                style={{ ...styles.typeTabBtn, ...(type === "gasto" ? styles.typeTabActiveRed : {}) }}
+                onClick={() => setType("gasto")}
+              >
+                - Gasto Personal
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label style={styles.inputLabel}>Categoría Personal</label>
+            <select style={styles.glassInput} value={category} onChange={e => setCategory(e.target.value)}>
+              {PERSONAL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={styles.inputLabel}>Concepto o Descripción</label>
+            <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej: Compra supermercado, Cena, etc." />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={styles.inputLabel}>Monto ($)</label>
+              <input style={styles.glassInput} type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required />
+            </div>
+            <div>
+              <label style={styles.inputLabel}>Fecha</label>
+              <input style={styles.glassInput} type="date" value={date} onChange={e => setDate(e.target.value)} required />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+            <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+            <button type="submit" style={styles.purpleBtn}>{item ? "Guardar Cambios" : "Guardar Personal"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============ AUTH SCREEN (LOGIN & REGISTER) ============
+function AuthScreen({ onLogin, onRegister, users }) {
+  const [isRegister, setIsRegister] = useState(false);
+  const [email, setEmail] = useState("admin@negocio.cl");
+  const [pass, setPass] = useState("123");
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("Personal");
+  const [error, setError] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError("");
+    if (isRegister) {
+      if (!name.trim() || !email.trim() || !pass.trim()) {
+        setError("Todos los campos son obligatorios.");
+        return;
+      }
+      if (users.some(u => u.email.toLowerCase() === email.trim().toLowerCase())) {
+        setError("Ya existe un usuario con este correo.");
+        return;
+      }
+      const newUser = { id: "u-" + Date.now(), name: name.trim(), email: email.trim(), pass, role };
+      onRegister(newUser);
+    } else {
+      const userFound = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase() && u.pass === pass);
+      if (userFound) {
+        onLogin(userFound);
+      } else {
+        setError("Credenciales incorrectas. Verifica tus datos.");
+      }
+    }
+  };
+
+  const setDemo = (userEmail) => {
+    const u = users.find(x => x.email === userEmail);
+    if (u) {
+      setEmail(u.email);
+      setPass(u.pass);
+    }
+  };
+
+  return (
+    <div style={styles.authContainer}>
+      <div style={styles.authGlassCard}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={styles.authLogo}>
+            <Icon name="boxes" size={24} color="#EDEAE1" />
+          </div>
+          <h2 style={{ color: "#F8FAFC", margin: "10px 0 4px", fontSize: 22, fontWeight: 700 }}>Almacén PRO</h2>
+          <p style={{ color: "#94A3B8", fontSize: 13 }}>Gestión Multi-Bodega & Finanzas Personales</p>
+        </div>
+
+        <div style={styles.authTabs}>
+          <button type="button" style={{ ...styles.authTabBtn, ...(isRegister ? {} : styles.authTabActive) }} onClick={() => { setIsRegister(false); setError(""); }}>Iniciar Sesión</button>
+          <button type="button" style={{ ...styles.authTabBtn, ...(isRegister ? styles.authTabActive : {}) }} onClick={() => { setIsRegister(true); setError(""); }}>Crear Cuenta</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {isRegister && (
+            <div>
+              <label style={styles.inputLabel}>Nombre completo</label>
+              <input style={styles.glassInput} placeholder="Ej: Benjamín Parra" value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+          )}
+          <div>
+            <label style={styles.inputLabel}>Correo electrónico</label>
+            <input style={styles.glassInput} type="email" placeholder="usuario@negocio.cl" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </div>
+          <div>
+            <label style={styles.inputLabel}>Contraseña</label>
+            <input style={styles.glassInput} type="password" placeholder="••••••••" value={pass} onChange={(e) => setPass(e.target.value)} required />
+          </div>
+          {isRegister && (
+            <div>
+              <label style={styles.inputLabel}>Rol / Tipo de Perfil</label>
+              <select style={styles.glassInput} value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="Personal">Personal (Finanzas Personales + Visión Global)</option>
+                <option value="Administrador">Administrador (Acceso Total Negocio & Personal)</option>
+                <option value="Vendedor">Vendedor (Punto de Venta y Clientes)</option>
+                <option value="Bodeguero">Bodeguero (Inventario y Almacenes)</option>
+              </select>
+            </div>
+          )}
+          {error && <div style={styles.errorMsg}>{error}</div>}
+          <button type="submit" style={styles.submitBtn}>
+            {isRegister ? "Registrar e Ingresar" : "Entrar al Sistema"}
+          </button>
+        </form>
+
+        {!isRegister && (
+          <div style={styles.demoSection}>
+            <span style={{ fontSize: 11, color: "#94A3B8" }}>Accesos rápidos de prueba:</span>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+              <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("admin@negocio.cl")}>Admin</button>
+              <button type="button" style={{ ...styles.quickDemoBtn, borderColor: "rgba(168,85,247,0.4)" }} onClick={() => setDemo("personal@negocio.cl")}>Personal ✨</button>
+              <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("ventas@negocio.cl")}>Ventas</button>
+              <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("bodega@negocio.cl")}>Bodega</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============ GESTIÓN DE USUARIOS ============
+function UsersManager({ users, onAddUser }) {
+  const [modal, setModal] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [role, setRole] = useState("Personal");
+
+  const handleCreate = (e) => {
+    e.preventDefault();
+    if (!name || !email || !pass) return;
+    onAddUser({ id: "u-" + Date.now(), name, email, pass, role });
+    setName(""); setEmail(""); setPass(""); setModal(false);
+  };
+
+  return (
+    <div>
+      <div style={styles.pageHeader}>
+        <div>
+          <div style={styles.eyebrow}>CONTROL DE ACCESO</div>
+          <h2 style={styles.pageTitle}>Cuentas y Perfiles del Sistema</h2>
+        </div>
+        <button style={styles.primaryBtn} onClick={() => setModal(true)}>+ Agregar Miembro</button>
+      </div>
+
+      <div style={styles.panel}>
+        <table style={styles.table}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={{ padding: "12px 10px" }}>Nombre</th>
+              <th>Correo</th>
+              <th>Rol asignado</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id} style={styles.tableRow}>
+                <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{u.name}</td>
+                <td style={{ color: "#94A3B8" }}>{u.email}</td>
+                <td>
+                  <span style={u.role === "Personal" ? styles.badgePurple : styles.badgeGreenTag}>
+                    {u.role}
+                  </span>
+                </td>
+                <td><span style={{ color: "#34D399", fontSize: 12 }}>● Activo</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <div style={styles.overlay} onClick={() => setModal(false)}>
+          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>Crear Cuenta de Usuario</h3>
+            <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={styles.inputLabel}>Nombre</label>
+                <input style={styles.glassInput} value={name} onChange={e => setName(e.target.value)} required />
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Correo</label>
+                <input style={styles.glassInput} type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Contraseña provisional</label>
+                <input style={styles.glassInput} type="password" value={pass} onChange={e => setPass(e.target.value)} required />
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Rol de acceso</label>
+                <select style={styles.glassInput} value={role} onChange={e => setRole(e.target.value)}>
+                  <option value="Personal">Personal (Finanzas Personales + Panel)</option>
+                  <option value="Administrador">Administrador (Acceso total)</option>
+                  <option value="Bodeguero">Bodeguero</option>
+                  <option value="Vendedor">Vendedor</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button type="button" style={styles.secondaryBtn} onClick={() => setModal(false)}>Cancelar</button>
+                <button type="submit" style={styles.primaryBtn}>Crear Usuario</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ SISTEMA DE ESTILOS GLASSMORFISMO ============
+const styles = {
+  appContainer: { 
+    display: "flex", 
+    minHeight: "92vh", 
+    background: "rgba(15, 23, 42, 0.65)", 
+    backdropFilter: "blur(20px)",
+    WebkitBackdropFilter: "blur(20px)",
+    borderRadius: 20, 
+    overflow: "hidden", 
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    boxShadow: "0 20px 50px rgba(0, 0, 0, 0.5)"
+  },
+  sidebar: { 
+    width: 240, 
+    background: "rgba(10, 15, 26, 0.7)", 
+    backdropFilter: "blur(25px)",
+    WebkitBackdropFilter: "blur(25px)",
+    padding: "20px 16px", 
+    display: "flex", 
+    flexDirection: "column", 
+    borderRight: "1px solid rgba(255, 255, 255, 0.08)" 
+  },
+  brand: { 
+    display: "flex", 
+    alignItems: "center", 
+    gap: 12, 
+    paddingBottom: 16, 
+    borderBottom: "1px solid rgba(255, 255, 255, 0.08)" 
+  },
+  brandMark: { 
+    width: 36, 
+    height: 36, 
+    borderRadius: 10, 
+    background: "linear-gradient(135deg, #0c4f1c 0%, #15803d 100%)", 
+    display: "flex", 
+    alignItems: "center", 
+    justifyContent: "center", 
+    boxShadow: "0 4px 12px rgba(12, 79, 28, 0.4)" 
+  },
+  brandTitle: { fontWeight: 700, fontSize: 15, color: "#F8FAFC", letterSpacing: "-0.02em" },
+  brandSub: { color: "#94A3B8", fontSize: 10.5 },
+  
+  userCard: { 
+    display: "flex", 
+    alignItems: "center", 
+    gap: 10, 
+    background: "rgba(255, 255, 255, 0.04)", 
+    padding: "10px 12px", 
+    borderRadius: 12, 
+    margin: "16px 0 12px", 
+    border: "1px solid rgba(255, 255, 255, 0.08)",
+    backdropFilter: "blur(10px)"
+  },
+  userAvatar: { 
+    width: 32, 
+    height: 32, 
+    borderRadius: "50%", 
+    background: "linear-gradient(135deg, #0c4f1c, #047857)", 
+    color: "#F8FAFC", 
+    display: "flex", 
+    alignItems: "center", 
+    justifyContent: "center", 
+    fontSize: 11, 
+    fontWeight: 700 
+  },
+  userName: { fontSize: 12.5, fontWeight: 600, color: "#F8FAFC", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  roleBadge: { fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, display: "block" },
+  logoutBtn: { background: "transparent", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" },
+  
+  nav: { display: "flex", flexDirection: "column", gap: 5, flex: 1, marginTop: 4 },
+  navItem: { 
+    display: "flex", 
+    alignItems: "center", 
+    gap: 10, 
+    padding: "10px 12px", 
+    borderRadius: 10, 
+    background: "transparent", 
+    border: "none", 
+    color: "#94A3B8", 
+    fontSize: 13, 
+    cursor: "pointer", 
+    textAlign: "left",
+    transition: "all 0.2s ease"
+  },
+  navItemActive: { 
+    background: "rgba(255, 255, 255, 0.08)", 
+    color: "#F8FAFC", 
+    fontWeight: 600,
+    border: "1px solid rgba(255, 255, 255, 0.12)",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
+  },
+  navBadge: { marginLeft: "auto", background: "rgba(239, 68, 68, 0.8)", color: "#FFF", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 10 },
+  navBadgePurple: { marginLeft: "auto", background: "rgba(168, 85, 247, 0.3)", color: "#E9D5FF", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, border: "1px solid rgba(168, 85, 247, 0.4)" },
+
+  footerStatus: { color: "#64748B", fontSize: 11, padding: "12px 4px 0", borderTop: "1px solid rgba(255, 255, 255, 0.06)", display: "flex", alignItems: "center", gap: 7 },
+  statusDot: { width: 7, height: 7, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 8px #34D399" },
+  
+  main: { flex: 1, padding: "28px 34px", overflowY: "auto" },
+  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 },
+  eyebrow: { color: "#34D399", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em" },
+  pageTitle: { margin: "3px 0 0", fontSize: 22, fontWeight: 700, color: "#F8FAFC" },
+
+  sectionHeader: { display: "flex", alignItems: "center", gap: 9, marginBottom: 14, borderLeft: "3px solid #34D399", paddingLeft: 10 },
+  sectionTitle: { fontSize: 14.5, fontWeight: 700, color: "#F1F5F9" },
+  linkGlassBtn: { marginLeft: "auto", background: "none", border: "none", color: "#C084FC", fontSize: 12, cursor: "pointer", fontWeight: 600 },
+
+  kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 },
+  kpiCard: { 
+    background: "rgba(255, 255, 255, 0.03)", 
+    border: "1px solid rgba(255, 255, 255, 0.08)", 
+    borderRadius: 14, 
+    padding: "16px 18px",
+    backdropFilter: "blur(12px)",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.15)"
+  },
+  kpiLabel: { color: "#94A3B8", fontSize: 12, fontWeight: 500 },
+  kpiValue: { fontSize: 21, fontWeight: 700, marginTop: 6, letterSpacing: "-0.02em" },
+  kpiSub: { fontSize: 11, color: "#64748B", marginTop: 4, display: "block" },
+
+  dashGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
+  panel: { 
+    background: "rgba(255, 255, 255, 0.03)", 
+    border: "1px solid rgba(255, 255, 255, 0.08)", 
+    borderRadius: 14, 
+    padding: "18px 20px",
+    backdropFilter: "blur(14px)",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.15)"
+  },
+  panelTitleRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
+  panelTitle: { margin: 0, fontSize: 14, color: "#F1F5F9", fontWeight: 600 },
+  badgeGlass: { background: "rgba(255,255,255,0.06)", color: "#94A3B8", fontSize: 10, padding: "2px 8px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.08)" },
+
+  listRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(255, 255, 255, 0.05)", fontSize: 13 },
+  glassNote: { display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", background: "rgba(255, 255, 255, 0.02)", borderRadius: 10, border: "1px solid rgba(255, 255, 255, 0.06)" },
+
+  tagGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 },
+  productGlassCard: { 
+    background: "rgba(255, 255, 255, 0.04)", 
+    border: "1px solid rgba(255, 255, 255, 0.09)", 
+    borderRadius: 14, 
+    padding: 16,
+    backdropFilter: "blur(14px)"
+  },
+  categoryBadge: { fontSize: 10, color: "#38BDF8", fontWeight: 700, textTransform: "uppercase", background: "rgba(56, 189, 248, 0.1)", padding: "2px 6px", borderRadius: 4 },
+  stockLowBadge: { background: "rgba(239, 68, 68, 0.2)", color: "#FCA5A5", fontSize: 10, padding: "2px 6px", borderRadius: 4, fontWeight: 700 },
+  cardDivider: { borderTop: "1px dashed rgba(255, 255, 255, 0.1)", margin: "10px 0" },
+  tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12, margin: "4px 0", color: "#CBD5E1" },
+
+  table: { width: "100%", borderCollapse: "collapse", color: "#F1F5F9", fontSize: 13 },
+  tableHeaderRow: { color: "#64748B", textAlign: "left", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" },
+  tableRow: { borderBottom: "1px solid rgba(255, 255, 255, 0.05)" },
+
+  primaryBtn: { 
+    background: "linear-gradient(135deg, #0c4f1c 0%, #15803d 100%)", 
+    color: "#F8FAFC", 
+    border: "1px solid rgba(255, 255, 255, 0.2)", 
+    borderRadius: 8, 
+    padding: "9px 15px", 
+    fontWeight: 600, 
+    cursor: "pointer", 
+    display: "inline-flex", 
+    alignItems: "center", 
+    gap: 7, 
+    fontSize: 13,
+    boxShadow: "0 4px 15px rgba(12, 79, 28, 0.4)"
+  },
+  purpleBtn: { 
+    background: "linear-gradient(135deg, #7E22CE 0%, #A855F7 100%)", 
+    color: "#F8FAFC", 
+    border: "1px solid rgba(255, 255, 255, 0.25)", 
+    borderRadius: 8, 
+    padding: "9px 15px", 
+    fontWeight: 600, 
+    cursor: "pointer", 
+    display: "inline-flex", 
+    alignItems: "center", 
+    gap: 7, 
+    fontSize: 13,
+    boxShadow: "0 4px 15px rgba(168, 85, 247, 0.35)"
+  },
+  secondaryBtn: { background: "rgba(255, 255, 255, 0.06)", color: "#E2E8F0", border: "1px solid rgba(255, 255, 255, 0.12)", borderRadius: 8, padding: "9px 15px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
+  smallGlassBtn: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer" },
+  actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "5px 7px" },
+
+  badgeGray: { background: "rgba(255, 255, 255, 0.06)", color: "#94A3B8", padding: "3px 8px", borderRadius: 6, fontSize: 11 },
+  badgeGreen: { background: "rgba(16, 185, 129, 0.15)", color: "#34D399", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
+  badgeRed: { background: "rgba(239, 68, 68, 0.15)", color: "#F87171", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
+  badgePurple: { background: "rgba(168, 85, 247, 0.2)", color: "#D8B4FE", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
+  badgeGreenTag: { background: "rgba(12, 79, 28, 0.4)", color: "#6EE7B7", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, border: "1px solid rgba(52, 211, 153, 0.3)" },
+
+  overlay: { position: "fixed", inset: 0, background: "rgba(5, 8, 15, 0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 },
+  glassModal: { 
+    background: "rgba(18, 24, 38, 0.85)", 
+    border: "1px solid rgba(255, 255, 255, 0.15)", 
+    borderRadius: 16, 
+    padding: 24, 
+    width: "100%", 
+    maxWidth: 480,
+    boxShadow: "0 25px 60px rgba(0, 0, 0, 0.6)",
+    backdropFilter: "blur(25px)"
+  },
+  modalTitle: { margin: "0 0 16px", color: "#F8FAFC", fontSize: 17, fontWeight: 700 },
+  inputLabel: { display: "block", color: "#94A3B8", fontSize: 11.5, marginBottom: 5, fontWeight: 500 },
+  glassInput: { 
+    background: "rgba(255, 255, 255, 0.05)", 
+    border: "1px solid rgba(255, 255, 255, 0.12)", 
+    borderRadius: 8, 
+    padding: "10px 12px", 
+    color: "#F8FAFC", 
+    fontSize: 13, 
+    width: "100%",
+    outline: "none"
+  },
+
+  typeTabBtn: { flex: 1, padding: "8px 0", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "#94A3B8", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 },
+  typeTabActiveGreen: { background: "rgba(16, 185, 129, 0.2)", color: "#34D399", borderColor: "rgba(52, 211, 153, 0.4)" },
+  typeTabActiveRed: { background: "rgba(239, 68, 68, 0.2)", color: "#F87171", borderColor: "rgba(248, 113, 113, 0.4)" },
+
+  authContainer: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "85vh" },
+  authGlassCard: { 
+    background: "rgba(15, 23, 42, 0.75)", 
+    border: "1px solid rgba(255, 255, 255, 0.12)", 
+    borderRadius: 20, 
+    padding: "32px 34px", 
+    width: "100%", 
+    maxWidth: 420,
+    boxShadow: "0 25px 60px rgba(0, 0, 0, 0.5)",
+    backdropFilter: "blur(25px)"
+  },
+  authLogo: { width: 48, height: 48, borderRadius: 12, background: "linear-gradient(135deg, #0c4f1c, #15803d)", color: "#EDEAE1", display: "inline-flex", alignItems: "center", justifyContent: "center" },
+  authTabs: { display: "flex", background: "rgba(255, 255, 255, 0.04)", padding: 4, borderRadius: 10, marginBottom: 18, border: "1px solid rgba(255, 255, 255, 0.08)" },
+  authTabBtn: { flex: 1, padding: "8px 0", background: "none", border: "none", color: "#94A3B8", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 6 },
+  authTabActive: { background: "rgba(255, 255, 255, 0.1)", color: "#F8FAFC", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" },
+  submitBtn: { background: "linear-gradient(135deg, #0c4f1c, #15803d)", color: "#F8FAFC", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: 8, padding: "11px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 6 },
+  errorMsg: { background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#FCA5A5", padding: "8px 10px", borderRadius: 8, fontSize: 12 },
+  demoSection: { marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255, 255, 255, 0.08)", textAlign: "center" },
+  quickDemoBtn: { background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.1)", color: "#CBD5E1", padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer" }
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
 </body>
 </html>
