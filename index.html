@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <!-- Favicon / Logo de la pestaña -->
   <link rel="icon" type="image/png" href="logo.png" />
-<title>Almacén - Control Comercial & Espacio Personal</title>
+<title>Almacén- Control Comercial & Espacio Personal</title>
 <!-- Supabase Client CDN -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <!-- React & Babel CDN -->
@@ -439,16 +439,18 @@ function App() {
     <div style={styles.appContainer}>
       <aside style={styles.sidebar}>
         <div style={styles.brand}>
-          <div style={styles.brandMark}>
-            <Icon name="boxes" size={18} color="#EDEAE1" />
-          </div>
-          <div>
-            <div style={styles.brandTitle}>Almacén</div>
-            <div style={styles.brandSub}>
-              {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
-            </div>
-          </div>
-        </div>
+  <img 
+    src="logo.png" 
+    alt="Logo Almacén" 
+    style={{ width: 36, height: 36, objectFit: "contain" }}
+  />
+  <div>
+    <div style={styles.brandTitle}>Almacén PRO</div>
+    <div style={styles.brandSub}>
+      {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
+    </div>
+  </div>
+</div>
 
         <div style={styles.userCard}>
           <div style={styles.userAvatar}>
