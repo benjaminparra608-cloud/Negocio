@@ -185,8 +185,13 @@ function exportToGoogleSheetsCSV(filename, rows) {
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
-    const active = localStorage.getItem(AUTH_STORAGE_KEY);
-    return active ? JSON.parse(active) : null;
+    try {
+      const active = localStorage.getItem(AUTH_STORAGE_KEY);
+      return active ? JSON.parse(active) : null;
+    } catch (e) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      return null;
+    }
   });
 
   const [users, setUsers] = useState(initialUsers);
@@ -199,7 +204,6 @@ function App() {
   const [tab, setTab] = useState("dashboard");
   const [locations] = useState(defaultLocations);
   const [isSyncing, setIsSyncing] = useState(false);
-
   const [salesMonthFilter, setSalesMonthFilter] = useState("");
 
   // Modales
@@ -247,6 +251,23 @@ function App() {
     }
     if (window.lucide) window.lucide.createIcons();
   }, [currentUser, tab, sales, products, personalFinances, salesMonthFilter]);
+
+  // TODOS LOS HOOKS useMemo DECLARADOS AL INICIO ANTES DE CONDICIONALES
+  const salesAvailableMonths = useMemo(() => {
+    const currentYM = new Date().toISOString().slice(0, 7);
+    const monthsSet = new Set(sales.map(s => (s.date || "").slice(0, 7)).filter(Boolean));
+    monthsSet.add(currentYM);
+    return Array.from(monthsSet).sort().reverse();
+  }, [sales]);
+
+  const filteredSales = useMemo(() => {
+    if (!salesMonthFilter) return sales;
+    return sales.filter(s => (s.date || "").startsWith(salesMonthFilter));
+  }, [sales, salesMonthFilter]);
+
+  const filteredSalesTotal = useMemo(() => {
+    return filteredSales.reduce((a, s) => a + Number(s.total || 0), 0);
+  }, [filteredSales]);
 
   const handleLogin = (userObj) => {
     setCurrentUser(userObj);
@@ -405,6 +426,7 @@ function App() {
     }
   };
 
+  // CONDICIONAL DE AUTENTICACIÓN (DESPUÉS DE TODOS LOS HOOKS)
   if (!currentUser) {
     return <AuthScreen onLogin={handleLogin} onRegister={handleRegister} users={users} />;
   }
@@ -425,22 +447,6 @@ function App() {
   const personalIncome = personalFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalBalance = personalIncome - personalExpense;
-
-  const salesAvailableMonths = useMemo(() => {
-    const currentYM = new Date().toISOString().slice(0, 7);
-    const monthsSet = new Set(sales.map(s => (s.date || "").slice(0, 7)).filter(Boolean));
-    monthsSet.add(currentYM);
-    return Array.from(monthsSet).sort().reverse();
-  }, [sales]);
-
-  const filteredSales = useMemo(() => {
-    if (!salesMonthFilter) return sales;
-    return sales.filter(s => (s.date || "").startsWith(salesMonthFilter));
-  }, [sales, salesMonthFilter]);
-
-  const filteredSalesTotal = useMemo(() => {
-    return filteredSales.reduce((a, s) => a + Number(s.total || 0), 0);
-  }, [filteredSales]);
 
   const handleExportBusinessFinances = () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1078,7 +1084,6 @@ function Dashboard({
     return map;
   }, [expenses]);
 
-  // CÁLCULO DE PROYECCIÓN DE GANANCIAS EN INVENTARIO
   const inventoryProjection = useMemo(() => {
     if (selectedProdFilter === "all") {
       let totalCost = 0;
@@ -1125,11 +1130,9 @@ function Dashboard({
     }
   }, [products, selectedProdFilter]);
 
-  // RENDERIZADO DE GRÁFICOS
   useEffect(() => {
     if (!window.Chart) return;
 
-    // Gráfico 1: Ventas vs Gastos
     if (chartRefs.current.trend) chartRefs.current.trend.destroy();
     if (trendCanvasRef.current) {
       chartRefs.current.trend = new window.Chart(trendCanvasRef.current, {
@@ -1169,7 +1172,6 @@ function Dashboard({
       });
     }
 
-    // Gráfico 2: Gastos por Categoría
     if (chartRefs.current.expense) chartRefs.current.expense.destroy();
     if (expenseCanvasRef.current) {
       const labels = Object.keys(expensesByCategory);
@@ -1193,7 +1195,6 @@ function Dashboard({
       });
     }
 
-    // Gráfico 3: Proyección de Ganancias (Costo vs Ganancia Neta)
     if (chartRefs.current.projection) chartRefs.current.projection.destroy();
     if (projectionCanvasRef.current && inventoryProjection) {
       if (inventoryProjection.isAll) {
@@ -1237,7 +1238,6 @@ function Dashboard({
           }
         });
       } else {
-        // Vista para producto individual: Comparativa Unitario vs Total Stock
         chartRefs.current.projection = new window.Chart(projectionCanvasRef.current, {
           type: "bar",
           data: {
@@ -1358,7 +1358,7 @@ function Dashboard({
         </div>
       </div>
 
-      {/* NUEVO PANEL: PROYECCIÓN DE GANANCIAS EN INVENTARIO */}
+      {/* PANEL: PROYECCIÓN DE GANANCIAS EN INVENTARIO */}
       <div style={{ ...styles.panel, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
           <div>
@@ -1373,7 +1373,6 @@ function Dashboard({
             </p>
           </div>
 
-          {/* FILTRO POR OBJETO / PRODUCTO */}
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <span style={{ fontSize: 12, color: "#94A3B8" }}>Ver producto:</span>
             <select 
@@ -1389,7 +1388,6 @@ function Dashboard({
           </div>
         </div>
 
-        {/* MÉTRICAS DE PROYECCIÓN */}
         {inventoryProjection && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: 10, marginBottom: 14 }}>
             <div style={styles.miniProjectionCard}>
@@ -1428,7 +1426,6 @@ function Dashboard({
           </div>
         )}
 
-        {/* GRÁFICO DE PROYECCIÓN */}
         <div style={{ height: 210 }}>
           <canvas ref={projectionCanvasRef}></canvas>
         </div>
@@ -2564,7 +2561,7 @@ const styles = {
     padding: "9px 12px", 
     color: "#F8FAFC", 
     fontSize: 13, 
-    width: "100%",
+    width: "100%", 
     outline: "none"
   },
 
