@@ -4,11 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Almacén - Control Comercial & Espacio Personal</title>
+<!-- Supabase Client CDN -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- React & Babel CDN -->
 <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- Lucide Icons -->
 <script src="https://unpkg.com/lucide@latest"></script>
+<!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   * { 
@@ -61,7 +65,6 @@
     font-family: inherit; 
   }
   
-  /* Scrollbar personalizado con estilo Glass */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
   ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
@@ -76,7 +79,14 @@
   <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+// CONFIGURACIÓN DE SUPABASE
+const SUPABASE_URL = "https://bcnkbsiqrcoosasjlypc.supabase.co"; 
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJjbmtic2lxcmNvb3Nhc2pseXBjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1ODA3NTYsImV4cCI6MjEwMzE1Njc1Nn0._MLWTyHL7fBIhYhIwvrguIcDqwz7D9uFoRSCbqPo6pU";
+
+const isSupabaseConfigured = SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes("TU-PROYECTO");
+const supabase = isSupabaseConfigured && window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 const Icon = ({ name, size = 16, color = "currentColor", ...props }) => {
   const iconRef = useRef(null);
@@ -88,25 +98,18 @@ const Icon = ({ name, size = 16, color = "currentColor", ...props }) => {
   return <i data-lucide={name} style={{ width: size, height: size, color, display: "inline-flex", verticalAlign: "middle" }} ref={iconRef} {...props}></i>;
 };
 
-// Claves de LocalStorage
-const AUTH_KEY = "negocio_active_user_v2";
-const USERS_KEY = "negocio_users_list_v2";
-const SALES_KEY = "negocio_sales_list_v2";
-const PROD_KEY = "negocio_products_v2";
-const EXPENSES_KEY = "negocio_expenses_v2";
-const CUSTOMERS_KEY = "negocio_customers_v2";
-const PERSONAL_FINANCES_KEY = "negocio_personal_finances_v2";
-
-const initialUsers = [
-  { id: "u-admin", name: "Benjamín", email: "admin@negocio.cl", pass: "123", role: "Administrador" },
-  { id: "u-personal", name: "Benjamín (Personal)", email: "personal@negocio.cl", pass: "123", role: "Personal" },
-  { id: "u-bodega", name: "R Almacén", email: "bodega@negocio.cl", pass: "123", role: "Bodeguero" },
-  { id: "u-ventas", name: "Anon Ventas", email: "ventas@negocio.cl", pass: "123", role: "Vendedor" }
-];
+const AUTH_STORAGE_KEY = "negocio_active_user_v2";
 
 const defaultLocations = [
   { id: "loc-central", name: "Bodega Central" },
   { id: "loc-tienda", name: "Tienda Principal" }
+];
+
+const initialUsers = [
+  { id: "u-admin", name: "Benjamín Parra", email: "admin@negocio.cl", pass: "123", role: "Administrador" },
+  { id: "u-personal", name: "Benjamín (Personal)", email: "personal@negocio.cl", pass: "123", role: "Personal" },
+  { id: "u-bodega", name: "R Almacén", email: "bodega@negocio.cl", pass: "123", role: "Bodeguero" },
+  { id: "u-ventas", name: "Anon Ventas", email: "ventas@negocio.cl", pass: "123", role: "Vendedor" }
 ];
 
 const initialMockProducts = [
@@ -130,12 +133,10 @@ const initialMockCustomers = [
   { id: "c2", name: "Consumidor Final", phone: "" }
 ];
 
-// Movimientos Personales Iniciales
 const initialPersonalFinances = [
   { id: "pf-1", date: new Date().toISOString().slice(0, 10), type: "ingreso", category: "Retiro de Ganancias", description: "Sueldo / Retiro del Negocio", amount: 450000 },
   { id: "pf-2", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Alimentación", description: "Supermercado quincena", amount: 65000 },
-  { id: "pf-3", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Servicios Personales", description: "Plan de Telefonía y Streaming", amount: 22990 },
-  { id: "pf-4", date: new Date().toISOString().slice(0, 10), type: "ingreso", category: "Otros Ingresos", description: "Trabajo freelance independiente", amount: 120000 }
+  { id: "pf-3", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Servicios Personales", description: "Plan de Telefonía y Streaming", amount: 22990 }
 ];
 
 const EXPENSE_CATEGORIES = ["Arriendo", "Insumos", "Sueldos", "Servicios", "Marketing", "Transporte", "Otros"];
@@ -145,37 +146,21 @@ const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currenc
 const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
 function App() {
-  const [users, setUsers] = useState(() => {
-    const local = localStorage.getItem(USERS_KEY);
-    return local ? JSON.parse(local) : initialUsers;
-  });
   const [currentUser, setCurrentUser] = useState(() => {
-    const active = localStorage.getItem(AUTH_KEY);
+    const active = localStorage.getItem(AUTH_STORAGE_KEY);
     return active ? JSON.parse(active) : null;
   });
-  const [products, setProducts] = useState(() => {
-    const local = localStorage.getItem(PROD_KEY);
-    return local ? JSON.parse(local) : initialMockProducts;
-  });
-  const [sales, setSales] = useState(() => {
-    const local = localStorage.getItem(SALES_KEY);
-    return local ? JSON.parse(local) : initialMockSales;
-  });
-  const [expenses, setExpenses] = useState(() => {
-    const local = localStorage.getItem(EXPENSES_KEY);
-    return local ? JSON.parse(local) : initialMockExpenses;
-  });
-  const [customers, setCustomers] = useState(() => {
-    const local = localStorage.getItem(CUSTOMERS_KEY);
-    return local ? JSON.parse(local) : initialMockCustomers;
-  });
-  const [personalFinances, setPersonalFinances] = useState(() => {
-    const local = localStorage.getItem(PERSONAL_FINANCES_KEY);
-    return local ? JSON.parse(local) : initialPersonalFinances;
-  });
 
+  const [users, setUsers] = useState(initialUsers);
+  const [products, setProducts] = useState(initialMockProducts);
+  const [sales, setSales] = useState(initialMockSales);
+  const [expenses, setExpenses] = useState(initialMockExpenses);
+  const [customers, setCustomers] = useState(initialMockCustomers);
+  const [personalFinances, setPersonalFinances] = useState(initialPersonalFinances);
+  
   const [tab, setTab] = useState("dashboard");
   const [locations] = useState(defaultLocations);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Modales
   const [saleModalState, setSaleModalState] = useState(null);
@@ -183,18 +168,42 @@ function App() {
   const [customerModalState, setCustomerModalState] = useState(null);
   const [personalModalState, setPersonalModalState] = useState(null);
 
-  useEffect(() => { localStorage.setItem(USERS_KEY, JSON.stringify(users)); }, [users]);
-  useEffect(() => { localStorage.setItem(SALES_KEY, JSON.stringify(sales)); }, [sales]);
-  useEffect(() => { localStorage.setItem(PROD_KEY, JSON.stringify(products)); }, [products]);
-  useEffect(() => { localStorage.setItem(EXPENSES_KEY, JSON.stringify(expenses)); }, [expenses]);
-  useEffect(() => { localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(customers)); }, [customers]);
-  useEffect(() => { localStorage.setItem(PERSONAL_FINANCES_KEY, JSON.stringify(personalFinances)); }, [personalFinances]);
+  // Carga inicial y sincronización desde Supabase
+  const fetchDataFromSupabase = useCallback(async () => {
+    if (!supabase) return;
+    setIsSyncing(true);
+    try {
+      const [uRes, pRes, sRes, eRes, cRes, pfRes] = await Promise.all([
+        supabase.from("usuarios").select("*"),
+        supabase.from("productos").select("*"),
+        supabase.from("ventas").select("*").order("date", { ascending: false }),
+        supabase.from("gastos").select("*").order("date", { ascending: false }),
+        supabase.from("clientes").select("*"),
+        supabase.from("finanzas_personales").select("*").order("date", { ascending: false })
+      ]);
+
+      if (uRes.data && uRes.data.length > 0) setUsers(uRes.data);
+      if (pRes.data && pRes.data.length > 0) setProducts(pRes.data);
+      if (sRes.data) setSales(sRes.data);
+      if (eRes.data) setExpenses(eRes.data);
+      if (cRes.data) setCustomers(cRes.data);
+      if (pfRes.data) setPersonalFinances(pfRes.data);
+    } catch (err) {
+      console.error("Error al sincronizar con Supabase:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDataFromSupabase();
+  }, [fetchDataFromSupabase]);
 
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(AUTH_KEY, JSON.stringify(currentUser));
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(currentUser));
     } else {
-      localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(AUTH_STORAGE_KEY);
     }
     if (window.lucide) window.lucide.createIcons();
   }, [currentUser, tab, sales, personalFinances]);
@@ -208,87 +217,130 @@ function App() {
     setCurrentUser(null);
   };
 
-  const handleRegister = (newUser) => {
+  const handleRegister = async (newUser) => {
     setUsers(prev => [...prev, newUser]);
     setCurrentUser(newUser);
+    if (supabase) {
+      await supabase.from("usuarios").insert([newUser]);
+    }
   };
 
-  const ensureCustomerExists = (name) => {
+  const ensureCustomerExists = async (name) => {
     const trimmed = (name || "").trim();
     if (!trimmed) return;
-    setCustomers(prev => {
-      const exists = prev.some(c => c.name.toLowerCase() === trimmed.toLowerCase());
-      if (exists) return prev;
-      return [...prev, { id: "c-" + Date.now(), name: trimmed, phone: "" }];
-    });
+    const exists = customers.some(c => c.name.toLowerCase() === trimmed.toLowerCase());
+    if (exists) return;
+
+    const newCustomer = { id: "c-" + Date.now(), name: trimmed, phone: "" };
+    setCustomers(prev => [...prev, newCustomer]);
+    if (supabase) {
+      await supabase.from("clientes").insert([newCustomer]);
+    }
   };
 
   // CRUD Ventas
-  const handleSaveSale = (saleData) => {
+  const handleSaveSale = async (saleData) => {
+    let updatedEntry;
     if (saleModalState === "new") {
-      const newEntry = { ...saleData, id: "s-" + Date.now() };
-      setSales(prev => [newEntry, ...prev]);
+      updatedEntry = { ...saleData, id: "s-" + Date.now() };
+      setSales(prev => [updatedEntry, ...prev]);
     } else {
-      setSales(prev => prev.map(s => s.id === saleModalState.id ? { ...saleData, id: s.id } : s));
+      updatedEntry = { ...saleData, id: saleModalState.id };
+      setSales(prev => prev.map(s => s.id === saleModalState.id ? updatedEntry : s));
     }
+
     ensureCustomerExists(saleData.customerName);
     setSaleModalState(null);
+
+    if (supabase) {
+      await supabase.from("ventas").upsert([updatedEntry]);
+    }
   };
 
-  const handleDeleteSale = (saleId) => {
+  const handleDeleteSale = async (saleId) => {
     if (confirm("¿Estás seguro de eliminar esta venta del registro?")) {
       setSales(prev => prev.filter(s => s.id !== saleId));
+      if (supabase) {
+        await supabase.from("ventas").delete().eq("id", saleId);
+      }
     }
   };
 
   // CRUD Gastos Negocio
-  const handleSaveExpense = (expenseData) => {
+  const handleSaveExpense = async (expenseData) => {
+    let updatedEntry;
     if (expenseModalState === "new") {
-      const newEntry = { ...expenseData, id: "e-" + Date.now() };
-      setExpenses(prev => [newEntry, ...prev]);
+      updatedEntry = { ...expenseData, id: "e-" + Date.now() };
+      setExpenses(prev => [updatedEntry, ...prev]);
     } else {
-      setExpenses(prev => prev.map(e => e.id === expenseModalState.id ? { ...expenseData, id: e.id } : e));
+      updatedEntry = { ...expenseData, id: expenseModalState.id };
+      setExpenses(prev => prev.map(e => e.id === expenseModalState.id ? updatedEntry : e));
     }
     setExpenseModalState(null);
+
+    if (supabase) {
+      await supabase.from("gastos").upsert([updatedEntry]);
+    }
   };
 
-  const handleDeleteExpense = (expenseId) => {
+  const handleDeleteExpense = async (expenseId) => {
     if (confirm("¿Estás seguro de eliminar este gasto del registro?")) {
       setExpenses(prev => prev.filter(e => e.id !== expenseId));
+      if (supabase) {
+        await supabase.from("gastos").delete().eq("id", expenseId);
+      }
     }
   };
 
   // CRUD Clientes
-  const handleSaveCustomer = (customerData) => {
+  const handleSaveCustomer = async (customerData) => {
+    let updatedEntry;
     if (customerModalState === "new") {
-      const newEntry = { ...customerData, id: "c-" + Date.now() };
-      setCustomers(prev => [newEntry, ...prev]);
+      updatedEntry = { ...customerData, id: "c-" + Date.now() };
+      setCustomers(prev => [updatedEntry, ...prev]);
     } else {
-      setCustomers(prev => prev.map(c => c.id === customerModalState.id ? { ...customerData, id: c.id } : c));
+      updatedEntry = { ...customerData, id: customerModalState.id };
+      setCustomers(prev => prev.map(c => c.id === customerModalState.id ? updatedEntry : c));
     }
     setCustomerModalState(null);
+
+    if (supabase) {
+      await supabase.from("clientes").upsert([updatedEntry]);
+    }
   };
 
-  const handleDeleteCustomer = (customerId) => {
+  const handleDeleteCustomer = async (customerId) => {
     if (confirm("¿Estás seguro de eliminar este cliente del registro?")) {
       setCustomers(prev => prev.filter(c => c.id !== customerId));
+      if (supabase) {
+        await supabase.from("clientes").delete().eq("id", customerId);
+      }
     }
   };
 
   // CRUD Finanzas Personales
-  const handleSavePersonalFinance = (itemData) => {
+  const handleSavePersonalFinance = async (itemData) => {
+    let updatedEntry;
     if (personalModalState === "new") {
-      const newEntry = { ...itemData, id: "pf-" + Date.now() };
-      setPersonalFinances(prev => [newEntry, ...prev]);
+      updatedEntry = { ...itemData, id: "pf-" + Date.now() };
+      setPersonalFinances(prev => [updatedEntry, ...prev]);
     } else {
-      setPersonalFinances(prev => prev.map(item => item.id === personalModalState.id ? { ...itemData, id: item.id } : item));
+      updatedEntry = { ...itemData, id: personalModalState.id };
+      setPersonalFinances(prev => prev.map(item => item.id === personalModalState.id ? updatedEntry : item));
     }
     setPersonalModalState(null);
+
+    if (supabase) {
+      await supabase.from("finanzas_personales").upsert([updatedEntry]);
+    }
   };
 
-  const handleDeletePersonalFinance = (id) => {
+  const handleDeletePersonalFinance = async (id) => {
     if (confirm("¿Eliminar este movimiento de tus finanzas personales?")) {
       setPersonalFinances(prev => prev.filter(i => i.id !== id));
+      if (supabase) {
+        await supabase.from("finanzas_personales").delete().eq("id", id);
+      }
     }
   };
 
@@ -322,7 +374,9 @@ function App() {
           </div>
           <div>
             <div style={styles.brandTitle}>Almacén PRO</div>
-            <div style={styles.brandSub}>Control Glass & Personal</div>
+            <div style={styles.brandSub}>
+              {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
+            </div>
           </div>
         </div>
 
@@ -399,7 +453,14 @@ function App() {
 
         <div style={styles.footerStatus}>
           <span style={styles.statusDot}></span>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUser.email}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {isSyncing ? "Sincronizando..." : currentUser.email}
+          </span>
+          {isSupabaseConfigured && (
+            <button onClick={fetchDataFromSupabase} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", color: "#94A3B8" }} title="Actualizar datos">
+              <Icon name="refresh-cw" size={12} />
+            </button>
+          )}
         </div>
       </aside>
 
@@ -572,7 +633,10 @@ function App() {
         )}
 
         {tab === "usuarios" && (role === "Administrador") && (
-          <UsersManager users={users} onAddUser={(u) => setUsers(prev => [...prev, u])} />
+          <UsersManager users={users} onAddUser={async (u) => {
+            setUsers(prev => [...prev, u]);
+            if (supabase) await supabase.from("usuarios").insert([u]);
+          }} />
         )}
       </main>
 
@@ -613,7 +677,7 @@ function App() {
   );
 }
 
-// ============ DASHBOARD PRINCIPAL CON DOBLE PANEL (NEGOCIO + PERSONAL) ============
+// ============ DASHBOARD ============
 function Dashboard({ 
   currentUser, canAccessSales, canAccessPersonal, sales, expenses, products, lowStock, locations, customers, 
   totalSales, totalExpenses, profit, personalFinances, personalIncome, personalExpense, personalBalance,
@@ -739,7 +803,7 @@ function Dashboard({
         </div>
       </div>
 
-      {/* SECCIÓN 1: FINANZAS DEL NEGOCIO */}
+      {/* SECCIÓN NEGOCIO */}
       <div style={styles.sectionHeader}>
         <Icon name="briefcase" size={17} color="#34D399" />
         <span style={styles.sectionTitle}>Finanzas & Operación del Negocio</span>
@@ -752,7 +816,7 @@ function Dashboard({
             <Icon name="trending-up" size={15} color="#34D399" />
           </div>
           <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(totalSales)}</div>
-          <span style={styles.kpiSub}>Ingresos totales por ventas</span>
+          <span style={styles.kpiSub}>Ingresos totales en ventas</span>
         </div>
 
         <div style={styles.kpiCard}>
@@ -807,7 +871,7 @@ function Dashboard({
         </div>
       </div>
 
-      {/* SECCIÓN 2: ESPACIO & FINANZAS PERSONALES */}
+      {/* SECCIÓN PERSONAL */}
       {canAccessPersonal && (
         <div style={{ marginTop: 28 }}>
           <div style={{ ...styles.sectionHeader, borderLeftColor: "#A855F7" }}>
@@ -825,7 +889,7 @@ function Dashboard({
                 <Icon name="arrow-down-left" size={15} color="#34D399" />
               </div>
               <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(personalIncome)}</div>
-              <span style={styles.kpiSub}>Retiros de negocio y freelance</span>
+              <span style={styles.kpiSub}>Retiros de negocio y otros</span>
             </div>
 
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
@@ -834,12 +898,12 @@ function Dashboard({
                 <Icon name="arrow-up-right" size={15} color="#F87171" />
               </div>
               <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(personalExpense)}</div>
-              <span style={styles.kpiSub}>Gastos diarios, comida y ocio</span>
+              <span style={styles.kpiSub}>Gastos diarios, ocio y vida</span>
             </div>
 
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={styles.kpiLabel}>Saldo Disponible Personal</span>
+                <span style={styles.kpiLabel}>Saldo Personal Disponible</span>
                 <Icon name="piggy-bank" size={16} color="#C084FC" />
               </div>
               <div style={{ ...styles.kpiValue, color: personalBalance >= 0 ? "#C084FC" : "#F87171" }}>
@@ -880,15 +944,15 @@ function Dashboard({
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={styles.glassNote}>
                   <Icon name="check-circle-2" size={15} color="#34D399" />
-                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Separar el 20% de las ventas semanales para ahorro personal.</span>
+                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Separar el 20% de las ventas semanales para fondo de reserva.</span>
                 </div>
                 <div style={styles.glassNote}>
                   <Icon name="clock" size={15} color="#FBBF24" />
-                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Revisar pagos de servicios básicos antes de fin de mes.</span>
+                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Revisar pagos de servicios básicos antes del fin de mes.</span>
                 </div>
                 <div style={styles.glassNote}>
                   <Icon name="sparkles" size={15} color="#38BDF8" />
-                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Las finanzas del negocio y personales se mantienen independientes.</span>
+                  <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Sincronización multi-dispositivo activa en tiempo real.</span>
                 </div>
               </div>
             </div>
@@ -899,7 +963,7 @@ function Dashboard({
   );
 }
 
-// ============ MÓDULO DEDICADO: FINANZAS & ESPACIO PERSONAL ============
+// ============ MÓDULO PERSONAL ============
 function PersonalFinancesManager({ personalFinances, income, expense, balance, onNew, onEdit, onDelete }) {
   return (
     <div>
@@ -927,7 +991,7 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
           <div style={{ ...styles.kpiValue, color: balance >= 0 ? "#C084FC" : "#F87171" }}>{money(balance)}</div>
         </div>
         <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
-          <span style={styles.kpiLabel}>Total de Movimientos</span>
+          <span style={styles.kpiLabel}>Total Movimientos</span>
           <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{personalFinances.length}</div>
         </div>
       </div>
@@ -948,7 +1012,7 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
             {personalFinances.length === 0 ? (
               <tr>
                 <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
-                  Aún no tienes movimientos personales registrados. Haz clic en "Registrar Movimiento".
+                  Aún no tienes movimientos personales registrados.
                 </td>
               </tr>
             ) : (
@@ -983,7 +1047,7 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
   );
 }
 
-// ============ GESTIÓN DE GASTOS DEL NEGOCIO ============
+// ============ GASTOS DEL NEGOCIO ============
 function GastosManager({ expenses, totalExpenses, onNew, onEdit, onDelete }) {
   return (
     <div>
@@ -1003,7 +1067,7 @@ function GastosManager({ expenses, totalExpenses, onNew, onEdit, onDelete }) {
           <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(totalExpenses)}</div>
         </div>
         <div style={styles.kpiCard}>
-          <span style={styles.kpiLabel}>Comprobantes / Facturas</span>
+          <span style={styles.kpiLabel}>Comprobantes Registrados</span>
           <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{expenses.length}</div>
         </div>
       </div>
@@ -1051,7 +1115,7 @@ function GastosManager({ expenses, totalExpenses, onNew, onEdit, onDelete }) {
   );
 }
 
-// ============ GESTIÓN DE CLIENTES ============
+// ============ CLIENTES ============
 function ClientesManager({ customers, sales, onNew, onEdit, onDelete }) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
@@ -1299,7 +1363,6 @@ function CustomerModal({ customer, onClose, onSave }) {
   );
 }
 
-// MODAL PARA MOVIMIENTOS PERSONALES
 function PersonalFinanceModal({ item, onClose, onSave }) {
   const [type, setType] = useState(item?.type || "gasto");
   const [category, setCategory] = useState(item?.category || PERSONAL_CATEGORIES[0]);
@@ -1373,7 +1436,7 @@ function PersonalFinanceModal({ item, onClose, onSave }) {
   );
 }
 
-// ============ AUTH SCREEN (LOGIN & REGISTER) ============
+// ============ AUTENTICACIÓN ============
 function AuthScreen({ onLogin, onRegister, users }) {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState("admin@negocio.cl");
@@ -1568,7 +1631,7 @@ function UsersManager({ users, onAddUser }) {
   );
 }
 
-// ============ SISTEMA DE ESTILOS GLASSMORFISMO ============
+// ============ ESTILOS ============
 const styles = {
   appContainer: { 
     display: "flex", 
