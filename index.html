@@ -67,6 +67,11 @@
     font-family: inherit; 
   }
   
+  option {
+    background-color: #0f172a;
+    color: #f1f5f9;
+  }
+
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
   ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
@@ -148,6 +153,18 @@ const PRODUCT_CATEGORIES = ["Ropa", "Bazar", "Accesorios", "Calzado", "Electrón
 const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
 const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
+// Helper para formatear '2026-09' a 'Septiembre 2026'
+const formatMonthLabel = (ym) => {
+  if (!ym) return "";
+  const [year, month] = ym.split("-");
+  const monthNames = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ];
+  const mIdx = parseInt(month, 10) - 1;
+  return `${monthNames[mIdx] || month} ${year}`;
+};
+
 function exportToGoogleSheetsCSV(filename, rows) {
   const csvContent = "\uFEFF" + rows.map(row => 
     row.map(cell => {
@@ -183,6 +200,9 @@ function App() {
   const [tab, setTab] = useState("dashboard");
   const [locations] = useState(defaultLocations);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Filtro de meses para Punto de Venta
+  const [salesMonthFilter, setSalesMonthFilter] = useState("");
 
   // Modales
   const [productModalState, setProductModalState] = useState(null);
@@ -228,7 +248,7 @@ function App() {
       localStorage.removeItem(AUTH_STORAGE_KEY);
     }
     if (window.lucide) window.lucide.createIcons();
-  }, [currentUser, tab, sales, products, personalFinances]);
+  }, [currentUser, tab, sales, products, personalFinances, salesMonthFilter]);
 
   const handleLogin = (userObj) => {
     setCurrentUser(userObj);
@@ -409,22 +429,41 @@ function App() {
   const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount || 0), 0);
   const profit = totalSales - totalExpenses;
 
-  // Métricas personales
+  // Métricas personales globales
   const personalIncome = personalFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalBalance = personalIncome - personalExpense;
 
+  // Meses disponibles para ventas
+  const salesAvailableMonths = useMemo(() => {
+    const currentYM = new Date().toISOString().slice(0, 7);
+    const monthsSet = new Set(sales.map(s => (s.date || "").slice(0, 7)).filter(Boolean));
+    monthsSet.add(currentYM);
+    return Array.from(monthsSet).sort().reverse();
+  }, [sales]);
+
+  const filteredSales = useMemo(() => {
+    if (!salesMonthFilter) return sales;
+    return sales.filter(s => (s.date || "").startsWith(salesMonthFilter));
+  }, [sales, salesMonthFilter]);
+
+  const filteredSalesTotal = useMemo(() => {
+    return filteredSales.reduce((a, s) => a + Number(s.total || 0), 0);
+  }, [filteredSales]);
+
   // Exportaciones
   const handleExportBusinessFinances = () => {
     const today = new Date().toISOString().slice(0, 10);
+    const labelPeriodo = salesMonthFilter ? formatMonthLabel(salesMonthFilter) : "Historial Completo";
     const rows = [
       ["REPORTE GENERAL - FINANZAS DEL NEGOCIO", "", "", "", ""],
       ["Fecha de Exportación:", today, "", "", ""],
+      ["Período Seleccionado:", labelPeriodo, "", "", ""],
       [""],
       ["--- VENTAS REGISTRADAS ---", "", "", "", ""],
       ["Fecha", "Cliente", "Detalle / Concepto", "Medio de Pago", "Monto ($)"],
-      ...sales.map(s => [s.date, s.customerName, s.details || "Venta General", s.paymentMethod, s.total]),
-      ["TOTAL VENTAS", "", "", "", totalSales],
+      ...filteredSales.map(s => [s.date, s.customerName, s.details || "Venta General", s.paymentMethod, s.total]),
+      ["TOTAL VENTAS PERÍODO", "", "", "", filteredSalesTotal],
       [""],
       ["--- GASTOS OPERATIVOS DEL NEGOCIO ---", "", "", "", ""],
       ["Fecha", "Categoría", "Descripción", "", "Monto ($)"],
@@ -436,18 +475,19 @@ function App() {
       ["Egresos por Gastos", "", "", "", totalExpenses],
       ["UTILIDAD NETA (NEGOCIO)", "", "", "", profit]
     ];
-    exportToGoogleSheetsCSV(`Finanzas_Negocio_${today}.csv`, rows);
+    exportToGoogleSheetsCSV(`Finanzas_Negocio_${salesMonthFilter || "Total"}_${today}.csv`, rows);
   };
 
-  const handleExportPersonalFinances = () => {
+  const handleExportPersonalFinances = (filteredList, periodLabel, pIncome, pExpense, pBalance) => {
     const today = new Date().toISOString().slice(0, 10);
     const rows = [
       ["REPORTE GENERAL - ESPACIO Y FINANZAS PERSONALES", "", "", "", ""],
       ["Fecha de Exportación:", today, "", "", ""],
+      ["Período:", periodLabel, "", "", ""],
       [""],
       ["--- REGISTRO DE MOVIMIENTOS PERSONALES ---", "", "", "", ""],
       ["Fecha", "Tipo", "Categoría", "Descripción / Motivo", "Monto ($)"],
-      ...personalFinances.map(p => [
+      ...filteredList.map(p => [
         p.date,
         p.type === "ingreso" ? "Ingreso (+)" : "Gasto (-)",
         p.category,
@@ -455,12 +495,12 @@ function App() {
         p.type === "ingreso" ? p.amount : -Math.abs(p.amount)
       ]),
       [""],
-      ["--- BALANCE PERSONAL ---", "", "", "", ""],
-      ["Total Ingresos Personales", "", "", "", personalIncome],
-      ["Total Gastos Personales", "", "", "", personalExpense],
-      ["SALDO DISPONIBLE EN BOLSILLO", "", "", "", personalBalance]
+      ["--- BALANCE PERSONAL DEL PERÍODO ---", "", "", "", ""],
+      ["Total Ingresos Personales", "", "", "", pIncome],
+      ["Total Gastos Personales", "", "", "", pExpense],
+      ["SALDO DISPONIBLE EN BOLSILLO", "", "", "", pBalance]
     ];
-    exportToGoogleSheetsCSV(`Finanzas_Personales_${today}.csv`, rows);
+    exportToGoogleSheetsCSV(`Finanzas_Personales_${periodLabel.replace(/\s+/g, '_')}_${today}.csv`, rows);
   };
 
   const handleExportInventory = () => {
@@ -607,16 +647,13 @@ function App() {
             onNewPersonal={() => setPersonalModalState("new")}
             onGoToPersonal={() => setTab("personal")}
             onExportBusiness={handleExportBusinessFinances}
-            onExportPersonal={handleExportPersonalFinances}
+            onExportPersonal={() => handleExportPersonalFinances(personalFinances, "Historial Completo", personalIncome, personalExpense, personalBalance)}
           />
         )}
 
         {tab === "personal" && canAccessPersonal && (
           <PersonalFinancesManager
             personalFinances={personalFinances}
-            income={personalIncome}
-            expense={personalExpense}
-            balance={personalBalance}
             onNew={() => setPersonalModalState("new")}
             onEdit={(item) => setPersonalModalState(item)}
             onDelete={handleDeletePersonalFinance}
@@ -748,7 +785,22 @@ function App() {
                 <div style={styles.eyebrow}>PUNTO DE VENTA & CAJA</div>
                 <h2 style={styles.pageTitle}>Registro de Ventas Comerciales</h2>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {/* FILTRO POR MES EN VENTAS */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Icon name="calendar" size={15} color="#38BDF8" />
+                  <select 
+                    style={styles.filterSelect} 
+                    value={salesMonthFilter} 
+                    onChange={e => setSalesMonthFilter(e.target.value)}
+                  >
+                    <option value="">Todos los meses</option>
+                    {salesAvailableMonths.map(ym => (
+                      <option key={ym} value={ym}>{formatMonthLabel(ym)}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <button style={styles.sheetsExportBtn} onClick={handleExportBusinessFinances} title="Exportar ventas a Google Sheets">
                   <Icon name="file-spreadsheet" size={14} color="#34D399" /> Exportar Sheets
                 </button>
@@ -757,6 +809,15 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {salesMonthFilter && (
+              <div style={styles.filterBanner}>
+                <Icon name="filter" size={14} color="#38BDF8" />
+                <span>Filtrando por: <strong>{formatMonthLabel(salesMonthFilter)}</strong> — Total vendido en el mes: <strong style={{ color: "#34D399" }}>{money(filteredSalesTotal)}</strong></span>
+                <button style={styles.clearFilterBtn} onClick={() => setSalesMonthFilter("")}>Mostrar todo</button>
+              </div>
+            )}
+
             <div style={styles.panel}>
               <table style={styles.table}>
                 <thead>
@@ -770,14 +831,14 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sales.length === 0 ? (
+                  {filteredSales.length === 0 ? (
                     <tr>
                       <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
-                        No hay ventas registradas.
+                        {salesMonthFilter ? `No hay ventas registradas en ${formatMonthLabel(salesMonthFilter)}.` : "No hay ventas registradas."}
                       </td>
                     </tr>
                   ) : (
-                    sales.map(s => (
+                    filteredSales.map(s => (
                       <tr key={s.id} style={styles.tableRow}>
                         <td style={{ padding: 10, color: "#94A3B8" }}>{s.date}</td>
                         <td style={{ fontWeight: 600, color: "#F8FAFC" }}>{s.customerName}</td>
@@ -1291,8 +1352,34 @@ function Dashboard({
   );
 }
 
-// ============ MÓDULO PERSONAL ============
-function PersonalFinancesManager({ personalFinances, income, expense, balance, onNew, onEdit, onDelete, onExport }) {
+// ============ MÓDULO PERSONAL CON FILTRO POR MES ============
+function PersonalFinancesManager({ personalFinances, onNew, onEdit, onDelete, onExport }) {
+  const [selectedMonth, setSelectedMonth] = useState("");
+
+  const availableMonths = useMemo(() => {
+    const currentYM = new Date().toISOString().slice(0, 7);
+    const monthsSet = new Set(personalFinances.map(p => (p.date || "").slice(0, 7)).filter(Boolean));
+    monthsSet.add(currentYM);
+    return Array.from(monthsSet).sort().reverse();
+  }, [personalFinances]);
+
+  const filteredFinances = useMemo(() => {
+    if (!selectedMonth) return personalFinances;
+    return personalFinances.filter(p => (p.date || "").startsWith(selectedMonth));
+  }, [personalFinances, selectedMonth]);
+
+  const periodIncome = useMemo(() => {
+    return filteredFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
+  }, [filteredFinances]);
+
+  const periodExpense = useMemo(() => {
+    return filteredFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
+  }, [filteredFinances]);
+
+  const periodBalance = periodIncome - periodExpense;
+
+  const currentPeriodLabel = selectedMonth ? formatMonthLabel(selectedMonth) : "Historial Completo";
+
   return (
     <div>
       <div style={styles.pageHeader}>
@@ -1300,8 +1387,23 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
           <div style={{ ...styles.eyebrow, color: "#C084FC" }}>GESTIÓN INDEPENDIENTE</div>
           <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳</h2>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button style={styles.purpleExportBtn} onClick={onExport}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {/* FILTRO POR MES PERSONAL */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name="calendar" size={15} color="#C084FC" />
+            <select 
+              style={{ ...styles.filterSelect, borderColor: "rgba(168, 85, 247, 0.3)" }} 
+              value={selectedMonth} 
+              onChange={e => setSelectedMonth(e.target.value)}
+            >
+              <option value="">Todos los meses</option>
+              {availableMonths.map(ym => (
+                <option key={ym} value={ym}>{formatMonthLabel(ym)}</option>
+              ))}
+            </select>
+          </div>
+
+          <button style={styles.purpleExportBtn} onClick={() => onExport(filteredFinances, currentPeriodLabel, periodIncome, periodExpense, periodBalance)}>
             <Icon name="file-spreadsheet" size={14} color="#C084FC" /> Exportar a Google Sheets
           </button>
           <button style={styles.purpleBtn} onClick={onNew}>
@@ -1310,22 +1412,38 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
         </div>
       </div>
 
+      {selectedMonth && (
+        <div style={{ ...styles.filterBanner, borderColor: "rgba(168, 85, 247, 0.3)", background: "rgba(168, 85, 247, 0.08)" }}>
+          <Icon name="filter" size={14} color="#C084FC" />
+          <span style={{ color: "#E9D5FF" }}>
+            Visualizando datos de: <strong>{formatMonthLabel(selectedMonth)}</strong>
+          </span>
+          <button style={{ ...styles.clearFilterBtn, color: "#C084FC" }} onClick={() => setSelectedMonth("")}>Ver todo el historial</button>
+        </div>
+      )}
+
       <div style={styles.kpiGrid}>
         <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
-          <span style={styles.kpiLabel}>Ingresos Registrados</span>
-          <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(income)}</div>
+          <span style={styles.kpiLabel}>
+            {selectedMonth ? `Ingresos (${formatMonthLabel(selectedMonth)})` : "Ingresos Registrados"}
+          </span>
+          <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(periodIncome)}</div>
         </div>
         <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
-          <span style={styles.kpiLabel}>Gastos Registrados</span>
-          <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(expense)}</div>
+          <span style={styles.kpiLabel}>
+            {selectedMonth ? `Gastos (${formatMonthLabel(selectedMonth)})` : "Gastos Registrados"}
+          </span>
+          <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(periodExpense)}</div>
         </div>
         <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
-          <span style={styles.kpiLabel}>Saldo Personal Neto</span>
-          <div style={{ ...styles.kpiValue, color: balance >= 0 ? "#C084FC" : "#F87171" }}>{money(balance)}</div>
+          <span style={styles.kpiLabel}>
+            {selectedMonth ? `Saldo del Mes` : "Saldo Personal Neto"}
+          </span>
+          <div style={{ ...styles.kpiValue, color: periodBalance >= 0 ? "#C084FC" : "#F87171" }}>{money(periodBalance)}</div>
         </div>
         <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
-          <span style={styles.kpiLabel}>Total Movimientos</span>
-          <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{personalFinances.length}</div>
+          <span style={styles.kpiLabel}>Movimientos del Período</span>
+          <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{filteredFinances.length}</div>
         </div>
       </div>
 
@@ -1342,14 +1460,14 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
             </tr>
           </thead>
           <tbody>
-            {personalFinances.length === 0 ? (
+            {filteredFinances.length === 0 ? (
               <tr>
                 <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
-                  Aún no tienes movimientos personales registrados.
+                  {selectedMonth ? `No hay movimientos personales registrados en ${formatMonthLabel(selectedMonth)}.` : "Aún no tienes movimientos personales registrados."}
                 </td>
               </tr>
             ) : (
-              personalFinances.map(item => (
+              filteredFinances.map(item => (
                 <tr key={item.id} style={styles.tableRow}>
                   <td style={{ padding: 10, color: "#94A3B8" }}>{item.date}</td>
                   <td>
@@ -2058,13 +2176,47 @@ const styles = {
   statusDot: { width: 7, height: 7, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 8px #34D399" },
   
   main: { flex: 1, padding: "28px 34px", overflowY: "auto" },
-  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 },
+  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 12 },
   eyebrow: { color: "#34D399", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em" },
   pageTitle: { margin: "3px 0 0", fontSize: 22, fontWeight: 700, color: "#F8FAFC" },
 
   sectionHeader: { display: "flex", alignItems: "center", gap: 9, borderLeft: "3px solid #34D399", paddingLeft: 10 },
   sectionTitle: { fontSize: 14.5, fontWeight: 700, color: "#F1F5F9" },
   linkGlassBtn: { background: "none", border: "none", color: "#C084FC", fontSize: 12, cursor: "pointer", fontWeight: 600 },
+
+  filterSelect: {
+    background: "rgba(255, 255, 255, 0.05)",
+    border: "1px solid rgba(255, 255, 255, 0.12)",
+    borderRadius: 8,
+    padding: "7px 12px",
+    color: "#F8FAFC",
+    fontSize: 12.5,
+    outline: "none",
+    cursor: "pointer",
+    backdropFilter: "blur(10px)"
+  },
+  filterBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "rgba(56, 189, 248, 0.08)",
+    border: "1px solid rgba(56, 189, 248, 0.25)",
+    borderRadius: 8,
+    padding: "8px 14px",
+    marginBottom: 16,
+    fontSize: 12.5,
+    color: "#BAE6FD"
+  },
+  clearFilterBtn: {
+    background: "none",
+    border: "none",
+    color: "#38BDF8",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 600,
+    textDecoration: "underline",
+    marginLeft: "auto"
+  },
 
   kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 },
   kpiCard: { 
