@@ -4,8 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <!-- Favicon / Logo de la pestaña -->
-  <link rel="icon" type="image/png" href="logo.png" />
-<title>Almacén- Control Comercial & Espacio Personal</title>
+<link rel="icon" type="image/png" href="logo.png" />
+<title>Almacén - Control Comercial & Espacio Personal</title>
 <!-- Supabase Client CDN -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <!-- React & Babel CDN -->
@@ -143,11 +143,11 @@ const initialPersonalFinances = [
 
 const EXPENSE_CATEGORIES = ["Arriendo", "Insumos", "Sueldos", "Servicios", "Marketing", "Transporte", "Otros"];
 const PERSONAL_CATEGORIES = ["Alimentación", "Vivienda", "Transporte", "Servicios Personales", "Salud & Bienestar", "Ocio & Viajes", "Ahorro / Inversión", "Retiro de Ganancias", "Otros Ingresos", "Otros Gastos"];
+const PRODUCT_CATEGORIES = ["Ropa", "Bazar", "Accesorios", "Calzado", "Electrónica", "Hogar", "Alimentos", "Otros"];
 
 const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
 const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
-// FUNCIÓN GENERADORA DE CSV COMPATIBLE CON GOOGLE SHEETS & EXCEL
 function exportToGoogleSheetsCSV(filename, rows) {
   const csvContent = "\uFEFF" + rows.map(row => 
     row.map(cell => {
@@ -185,6 +185,7 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Modales
+  const [productModalState, setProductModalState] = useState(null);
   const [saleModalState, setSaleModalState] = useState(null);
   const [expenseModalState, setExpenseModalState] = useState(null);
   const [customerModalState, setCustomerModalState] = useState(null);
@@ -227,7 +228,7 @@ function App() {
       localStorage.removeItem(AUTH_STORAGE_KEY);
     }
     if (window.lucide) window.lucide.createIcons();
-  }, [currentUser, tab, sales, personalFinances]);
+  }, [currentUser, tab, sales, products, personalFinances]);
 
   const handleLogin = (userObj) => {
     setCurrentUser(userObj);
@@ -243,6 +244,32 @@ function App() {
     setCurrentUser(newUser);
     if (supabase) {
       await supabase.from("usuarios").insert([newUser]);
+    }
+  };
+
+  // CRUD Inventario / Productos
+  const handleSaveProduct = async (productData) => {
+    let updatedEntry;
+    if (productModalState === "new") {
+      updatedEntry = { ...productData, id: "p-" + Date.now() };
+      setProducts(prev => [updatedEntry, ...prev]);
+    } else {
+      updatedEntry = { ...productData, id: productModalState.id };
+      setProducts(prev => prev.map(p => p.id === productModalState.id ? updatedEntry : p));
+    }
+    setProductModalState(null);
+
+    if (supabase) {
+      await supabase.from("productos").upsert([updatedEntry]);
+    }
+  };
+
+  const handleDeleteProduct = async (productId) => {
+    if (confirm("¿Estás seguro de eliminar este producto del inventario?")) {
+      setProducts(prev => prev.filter(p => p.id !== productId));
+      if (supabase) {
+        await supabase.from("productos").delete().eq("id", productId);
+      }
     }
   };
 
@@ -375,6 +402,7 @@ function App() {
   const canAccessWarehouses = role === "Administrador" || role === "Bodeguero";
   const canAccessSales = role === "Administrador" || role === "Vendedor";
   const canAccessCustomers = role === "Administrador" || role === "Vendedor";
+  const canManageInventory = role === "Administrador" || role === "Bodeguero";
 
   const lowStock = products.filter(p => getProductTotalStock(p) <= (p.minStock || 0));
   const totalSales = sales.reduce((a, s) => a + Number(s.total || 0), 0);
@@ -386,7 +414,7 @@ function App() {
   const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalBalance = personalIncome - personalExpense;
 
-  // EXPORTACIONES A GOOGLE SHEETS / EXCEL
+  // Exportaciones
   const handleExportBusinessFinances = () => {
     const today = new Date().toISOString().slice(0, 10);
     const rows = [
@@ -435,22 +463,42 @@ function App() {
     exportToGoogleSheetsCSV(`Finanzas_Personales_${today}.csv`, rows);
   };
 
+  const handleExportInventory = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = [
+      ["CATÁLOGO DE PRODUCTOS E INVENTARIO", "", "", "", "", ""],
+      ["Fecha de Exportación:", today, "", "", "", ""],
+      [""],
+      ["Nombre", "Categoría", "SKU", "Costo ($)", "Precio Venta ($)", "Stock Total", "Stock Mínimo"],
+      ...products.map(p => [
+        p.name,
+        p.category,
+        p.sku,
+        p.costPrice,
+        p.salePrice,
+        getProductTotalStock(p),
+        p.minStock
+      ])
+    ];
+    exportToGoogleSheetsCSV(`Inventario_${today}.csv`, rows);
+  };
+
   return (
     <div style={styles.appContainer}>
       <aside style={styles.sidebar}>
         <div style={styles.brand}>
-  <img 
-    src="logo.png" 
-    alt="Logo Almacén" 
-    style={{ width: 36, height: 36, objectFit: "contain" }}
-  />
-  <div>
-    <div style={styles.brandTitle}>Almacén PRO</div>
-    <div style={styles.brandSub}>
-      {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
-    </div>
-  </div>
-</div>
+          <img 
+            src="logo.png" 
+            alt="Logo Almacén" 
+            style={{ width: 36, height: 36, objectFit: "contain" }}
+          />
+          <div>
+            <div style={styles.brandTitle}>Almacén</div>
+            <div style={styles.brandSub}>
+              {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
+            </div>
+          </div>
+        </div>
 
         <div style={styles.userCard}>
           <div style={styles.userAvatar}>
@@ -583,25 +631,81 @@ function App() {
                 <div style={styles.eyebrow}>INVENTARIO & CATÁLOGO</div>
                 <h2 style={styles.pageTitle}>Fichas de Productos y Existencias</h2>
               </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={styles.sheetsExportBtn} onClick={handleExportInventory} title="Exportar catálogo a Google Sheets">
+                  <Icon name="file-spreadsheet" size={14} color="#34D399" /> Exportar Sheets
+                </button>
+                {canManageInventory && (
+                  <button style={styles.primaryBtn} onClick={() => setProductModalState("new")}>
+                    <Icon name="plus" size={14} /> Agregar Producto
+                  </button>
+                )}
+              </div>
             </div>
-            <div style={styles.tagGrid}>
-              {products.map(p => (
-                <div key={p.id} style={styles.productGlassCard}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={styles.categoryBadge}>{p.category}</span>
-                    {getProductTotalStock(p) <= p.minStock && (
-                      <span style={styles.stockLowBadge}>Stock Crítico</span>
-                    )}
+
+            {products.length === 0 ? (
+              <div style={styles.panel}>
+                <p style={{ textAlign: "center", color: "#64748B", margin: 20 }}>
+                  No hay productos registrados en el inventario. Haz clic en "Agregar Producto".
+                </p>
+              </div>
+            ) : (
+              <div style={styles.tagGrid}>
+                {products.map(p => (
+                  <div key={p.id} style={styles.productGlassCard}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={styles.categoryBadge}>{p.category}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        {getProductTotalStock(p) <= p.minStock && (
+                          <span style={styles.stockLowBadge}>Stock Crítico</span>
+                        )}
+                        {canManageInventory && (
+                          <>
+                            <button style={styles.actionIconBtn} onClick={() => setProductModalState(p)} title="Modificar Producto">
+                              <Icon name="pencil" size={13} color="#38BDF8" />
+                            </button>
+                            <button style={styles.actionIconBtn} onClick={() => handleDeleteProduct(p.id)} title="Eliminar Producto">
+                              <Icon name="trash-2" size={13} color="#F87171" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 16, fontWeight: 700, margin: "10px 0 2px", color: "#F8FAFC" }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: "monospace" }}>SKU: {p.sku || "-"}</div>
+                    <div style={styles.cardDivider}></div>
+                    
+                    <div style={styles.tagRow}>
+                      <span>Precio Venta:</span>
+                      <strong style={{ color: "#34D399" }}>{money(p.salePrice)}</strong>
+                    </div>
+                    <div style={styles.tagRow}>
+                      <span>Costo Unitario:</span>
+                      <span>{money(p.costPrice)}</span>
+                    </div>
+                    <div style={styles.tagRow}>
+                      <span>Stock Mínimo:</span>
+                      <span style={{ color: "#94A3B8" }}>{p.minStock || 0} un.</span>
+                    </div>
+                    <div style={styles.tagRow}>
+                      <span>Stock Global:</span>
+                      <strong style={{ color: "#38BDF8" }}>{getProductTotalStock(p)} un.</strong>
+                    </div>
+
+                    {/* Desglose por bodega */}
+                    <div style={styles.stockByLocBox}>
+                      {locations.map(loc => (
+                        <div key={loc.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94A3B8", margin: "2px 0" }}>
+                          <span>{loc.name}:</span>
+                          <strong style={{ color: "#E2E8F0" }}>{p.stockByLocation?.[loc.id] || 0}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 16, fontWeight: 700, margin: "10px 0 2px", color: "#F8FAFC" }}>{p.name}</div>
-                  <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: "monospace" }}>SKU: {p.sku}</div>
-                  <div style={styles.cardDivider}></div>
-                  <div style={styles.tagRow}><span>Precio Venta:</span><strong style={{ color: "#34D399" }}>{money(p.salePrice)}</strong></div>
-                  <div style={styles.tagRow}><span>Costo Unitario:</span><span>{money(p.costPrice)}</span></div>
-                  <div style={styles.tagRow}><span>Stock Global:</span><strong style={{ color: "#38BDF8" }}>{getProductTotalStock(p)} un.</strong></div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -612,6 +716,11 @@ function App() {
                 <div style={styles.eyebrow}>LOGÍSTICA MULTI-BODEGA</div>
                 <h2 style={styles.pageTitle}>Distribución de Stock por Almacén</h2>
               </div>
+              {canManageInventory && (
+                <button style={styles.primaryBtn} onClick={() => setProductModalState("new")}>
+                  <Icon name="plus" size={14} /> Nuevo Artículo
+                </button>
+              )}
             </div>
             <div style={styles.dashGrid}>
               {locations.map(loc => (
@@ -721,7 +830,16 @@ function App() {
         )}
       </main>
 
-      {/* Modales */}
+      {/* MODALES */}
+      {productModalState && (
+        <ProductModal
+          product={productModalState === "new" ? null : productModalState}
+          locations={locations}
+          onClose={() => setProductModalState(null)}
+          onSave={handleSaveProduct}
+        />
+      )}
+
       {saleModalState && (
         <SaleModal
           sale={saleModalState === "new" ? null : saleModalState}
@@ -754,6 +872,123 @@ function App() {
           onSave={handleSavePersonalFinance}
         />
       )}
+    </div>
+  );
+}
+
+// ============ MODAL DE PRODUCTO / INVENTARIO ============
+function ProductModal({ product, locations, onClose, onSave }) {
+  const [name, setName] = useState(product?.name || "");
+  const [category, setCategory] = useState(product?.category || PRODUCT_CATEGORIES[0]);
+  const [sku, setSku] = useState(product?.sku || "");
+  const [barcode, setBarcode] = useState(product?.barcode || "");
+  const [costPrice, setCostPrice] = useState(product?.costPrice || 0);
+  const [salePrice, setSalePrice] = useState(product?.salePrice || 0);
+  const [minStock, setMinStock] = useState(product?.minStock || 3);
+  
+  const [stockByLocation, setStockByLocation] = useState(() => {
+    const map = {};
+    locations.forEach(loc => {
+      map[loc.id] = product?.stockByLocation?.[loc.id] !== undefined ? product.stockByLocation[loc.id] : 0;
+    });
+    return map;
+  });
+
+  const handleStockChange = (locId, value) => {
+    setStockByLocation(prev => ({
+      ...prev,
+      [locId]: Number(value) >= 0 ? Number(value) : 0
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(),
+      category,
+      sku: sku.trim() || `SKU-${Date.now().toString().slice(-4)}`,
+      barcode: barcode.trim(),
+      costPrice: Number(costPrice) || 0,
+      salePrice: Number(salePrice) || 0,
+      minStock: Number(minStock) || 0,
+      stockByLocation
+    });
+  };
+
+  return (
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+        <h3 style={styles.modalTitle}>
+          {product ? "Modificar Ficha de Producto" : "Nuevo Producto en Inventario 📦"}
+        </h3>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 10 }}>
+            <div>
+              <label style={styles.inputLabel}>Nombre del Producto</label>
+              <input style={styles.glassInput} value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Polera Oversize" required />
+            </div>
+            <div>
+              <label style={styles.inputLabel}>Categoría</label>
+              <select style={styles.glassInput} value={category} onChange={e => setCategory(e.target.value)}>
+                {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={styles.inputLabel}>SKU / Código Referencia</label>
+              <input style={styles.glassInput} value={sku} onChange={e => setSku(e.target.value)} placeholder="Ej: ROP-POL-101" />
+            </div>
+            <div>
+              <label style={styles.inputLabel}>Código de Barras (Opcional)</label>
+              <input style={styles.glassInput} value={barcode} onChange={e => setBarcode(e.target.value)} placeholder="Ej: 7801001" />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={styles.inputLabel}>Costo Unitario ($)</label>
+              <input style={styles.glassInput} type="number" min="0" value={costPrice} onChange={e => setCostPrice(e.target.value)} required />
+            </div>
+            <div>
+              <label style={styles.inputLabel}>Precio Venta ($)</label>
+              <input style={styles.glassInput} type="number" min="0" value={salePrice} onChange={e => setSalePrice(e.target.value)} required />
+            </div>
+            <div>
+              <label style={styles.inputLabel}>Stock Mínimo</label>
+              <input style={styles.glassInput} type="number" min="0" value={minStock} onChange={e => setMinStock(e.target.value)} required />
+            </div>
+          </div>
+
+          {/* Existencias por cada almacén */}
+          <div style={{ background: "rgba(255, 255, 255, 0.02)", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255, 255, 255, 0.08)", marginTop: 4 }}>
+            <span style={{ fontSize: 11.5, color: "#38BDF8", fontWeight: 600, display: "block", marginBottom: 8 }}>
+              Distribución de Existencias por Bodega:
+            </span>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {locations.map(loc => (
+                <div key={loc.id}>
+                  <label style={{ ...styles.inputLabel, fontSize: 11, color: "#CBD5E1" }}>{loc.name}</label>
+                  <input 
+                    style={styles.glassInput} 
+                    type="number" 
+                    min="0" 
+                    value={stockByLocation[loc.id] || 0} 
+                    onChange={e => handleStockChange(loc.id, e.target.value)} 
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+            <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+            <button type="submit" style={styles.primaryBtn}>{product ? "Guardar Cambios" : "Guardar Producto"}</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -1764,16 +1999,6 @@ const styles = {
     paddingBottom: 16, 
     borderBottom: "1px solid rgba(255, 255, 255, 0.08)" 
   },
-  brandMark: { 
-    width: 36, 
-    height: 36, 
-    borderRadius: 10, 
-    background: "linear-gradient(135deg, #0c4f1c 0%, #15803d 100%)", 
-    display: "flex", 
-    alignItems: "center", 
-    justifyContent: "center", 
-    boxShadow: "0 4px 12px rgba(12, 79, 28, 0.4)" 
-  },
   brandTitle: { fontWeight: 700, fontSize: 15, color: "#F8FAFC", letterSpacing: "-0.02em" },
   brandSub: { color: "#94A3B8", fontSize: 10.5 },
   
@@ -1882,6 +2107,7 @@ const styles = {
   stockLowBadge: { background: "rgba(239, 68, 68, 0.2)", color: "#FCA5A5", fontSize: 10, padding: "2px 6px", borderRadius: 4, fontWeight: 700 },
   cardDivider: { borderTop: "1px dashed rgba(255, 255, 255, 0.1)", margin: "10px 0" },
   tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12, margin: "4px 0", color: "#CBD5E1" },
+  stockByLocBox: { marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(255, 255, 255, 0.05)" },
 
   table: { width: "100%", borderCollapse: "collapse", color: "#F1F5F9", fontSize: 13 },
   tableHeaderRow: { color: "#64748B", textAlign: "left", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" },
@@ -1945,7 +2171,7 @@ const styles = {
   },
   secondaryBtn: { background: "rgba(255, 255, 255, 0.06)", color: "#E2E8F0", border: "1px solid rgba(255, 255, 255, 0.12)", borderRadius: 8, padding: "9px 15px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
   smallGlassBtn: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer" },
-  actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "5px 7px" },
+  actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "4px 5px", display: "inline-flex", alignItems: "center" },
 
   badgeGray: { background: "rgba(255, 255, 255, 0.06)", color: "#94A3B8", padding: "3px 8px", borderRadius: 6, fontSize: 11 },
   badgeGreen: { background: "rgba(16, 185, 129, 0.15)", color: "#34D399", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
@@ -1960,7 +2186,7 @@ const styles = {
     borderRadius: 16, 
     padding: 24, 
     width: "100%", 
-    maxWidth: 480,
+    maxWidth: 520,
     boxShadow: "0 25px 60px rgba(0, 0, 0, 0.6)",
     backdropFilter: "blur(25px)"
   },
@@ -1970,7 +2196,7 @@ const styles = {
     background: "rgba(255, 255, 255, 0.05)", 
     border: "1px solid rgba(255, 255, 255, 0.12)", 
     borderRadius: 8, 
-    padding: "10px 12px", 
+    padding: "9px 12px", 
     color: "#F8FAFC", 
     fontSize: 13, 
     width: "100%",
