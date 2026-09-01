@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Almacén - Control Comercial & Espacio Personal</title>
+<title>Almacén PRO - Control Comercial & Espacio Personal</title>
 <!-- Supabase Client CDN -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <!-- React & Babel CDN -->
@@ -145,6 +145,26 @@ const PERSONAL_CATEGORIES = ["Alimentación", "Vivienda", "Transporte", "Servici
 const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
 const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
+// FUNCIÓN GENERADORA DE CSV COMPATIBLE CON GOOGLE SHEETS & EXCEL
+function exportToGoogleSheetsCSV(filename, rows) {
+  const csvContent = "\uFEFF" + rows.map(row => 
+    row.map(cell => {
+      if (cell === null || cell === undefined) return '""';
+      const cellStr = String(cell).replace(/"/g, '""');
+      return `"${cellStr}"`;
+    }).join(";")
+  ).join("\r\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     const active = localStorage.getItem(AUTH_STORAGE_KEY);
@@ -168,7 +188,6 @@ function App() {
   const [customerModalState, setCustomerModalState] = useState(null);
   const [personalModalState, setPersonalModalState] = useState(null);
 
-  // Carga inicial y sincronización desde Supabase
   const fetchDataFromSupabase = useCallback(async () => {
     if (!supabase) return;
     setIsSyncing(true);
@@ -365,6 +384,55 @@ function App() {
   const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalBalance = personalIncome - personalExpense;
 
+  // EXPORTACIONES A GOOGLE SHEETS / EXCEL
+  const handleExportBusinessFinances = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = [
+      ["REPORTE GENERAL - FINANZAS DEL NEGOCIO", "", "", "", ""],
+      ["Fecha de Exportación:", today, "", "", ""],
+      [""],
+      ["--- VENTAS REGISTRADAS ---", "", "", "", ""],
+      ["Fecha", "Cliente", "Detalle / Concepto", "Medio de Pago", "Monto ($)"],
+      ...sales.map(s => [s.date, s.customerName, s.details || "Venta General", s.paymentMethod, s.total]),
+      ["TOTAL VENTAS", "", "", "", totalSales],
+      [""],
+      ["--- GASTOS OPERATIVOS DEL NEGOCIO ---", "", "", "", ""],
+      ["Fecha", "Categoría", "Descripción", "", "Monto ($)"],
+      ...expenses.map(e => [e.date, e.category, e.description || "-", "", e.amount]),
+      ["TOTAL GASTOS", "", "", "", totalExpenses],
+      [""],
+      ["--- RESUMEN FINANCIERO ---", "", "", "", ""],
+      ["Ingresos por Ventas", "", "", "", totalSales],
+      ["Egresos por Gastos", "", "", "", totalExpenses],
+      ["UTILIDAD NETA (NEGOCIO)", "", "", "", profit]
+    ];
+    exportToGoogleSheetsCSV(`Finanzas_Negocio_${today}.csv`, rows);
+  };
+
+  const handleExportPersonalFinances = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = [
+      ["REPORTE GENERAL - ESPACIO Y FINANZAS PERSONALES", "", "", "", ""],
+      ["Fecha de Exportación:", today, "", "", ""],
+      [""],
+      ["--- REGISTRO DE MOVIMIENTOS PERSONALES ---", "", "", "", ""],
+      ["Fecha", "Tipo", "Categoría", "Descripción / Motivo", "Monto ($)"],
+      ...personalFinances.map(p => [
+        p.date,
+        p.type === "ingreso" ? "Ingreso (+)" : "Gasto (-)",
+        p.category,
+        p.description || "-",
+        p.type === "ingreso" ? p.amount : -Math.abs(p.amount)
+      ]),
+      [""],
+      ["--- BALANCE PERSONAL ---", "", "", "", ""],
+      ["Total Ingresos Personales", "", "", "", personalIncome],
+      ["Total Gastos Personales", "", "", "", personalExpense],
+      ["SALDO DISPONIBLE EN BOLSILLO", "", "", "", personalBalance]
+    ];
+    exportToGoogleSheetsCSV(`Finanzas_Personales_${today}.csv`, rows);
+  };
+
   return (
     <div style={styles.appContainer}>
       <aside style={styles.sidebar}>
@@ -373,7 +441,7 @@ function App() {
             <Icon name="boxes" size={18} color="#EDEAE1" />
           </div>
           <div>
-            <div style={styles.brandTitle}>Almacén PRO</div>
+            <div style={styles.brandTitle}>Almacén</div>
             <div style={styles.brandSub}>
               {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
             </div>
@@ -486,6 +554,8 @@ function App() {
             onNewSale={() => setSaleModalState("new")}
             onNewPersonal={() => setPersonalModalState("new")}
             onGoToPersonal={() => setTab("personal")}
+            onExportBusiness={handleExportBusinessFinances}
+            onExportPersonal={handleExportPersonalFinances}
           />
         )}
 
@@ -498,6 +568,7 @@ function App() {
             onNew={() => setPersonalModalState("new")}
             onEdit={(item) => setPersonalModalState(item)}
             onDelete={handleDeletePersonalFinance}
+            onExport={handleExportPersonalFinances}
           />
         )}
 
@@ -564,9 +635,14 @@ function App() {
                 <div style={styles.eyebrow}>PUNTO DE VENTA & CAJA</div>
                 <h2 style={styles.pageTitle}>Registro de Ventas Comerciales</h2>
               </div>
-              <button style={styles.primaryBtn} onClick={() => setSaleModalState("new")}>
-                <Icon name="plus" size={14} /> Registrar Venta
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={styles.sheetsExportBtn} onClick={handleExportBusinessFinances} title="Exportar ventas a Google Sheets">
+                  <Icon name="file-spreadsheet" size={14} color="#34D399" /> Exportar Sheets
+                </button>
+                <button style={styles.primaryBtn} onClick={() => setSaleModalState("new")}>
+                  <Icon name="plus" size={14} /> Registrar Venta
+                </button>
+              </div>
             </div>
             <div style={styles.panel}>
               <table style={styles.table}>
@@ -629,6 +705,7 @@ function App() {
             onNew={() => setExpenseModalState("new")}
             onEdit={(e) => setExpenseModalState(e)}
             onDelete={handleDeleteExpense}
+            onExport={handleExportBusinessFinances}
           />
         )}
 
@@ -681,7 +758,7 @@ function App() {
 function Dashboard({ 
   currentUser, canAccessSales, canAccessPersonal, sales, expenses, products, lowStock, locations, customers, 
   totalSales, totalExpenses, profit, personalFinances, personalIncome, personalExpense, personalBalance,
-  onNewSale, onNewPersonal, onGoToPersonal 
+  onNewSale, onNewPersonal, onGoToPersonal, onExportBusiness, onExportPersonal
 }) {
   const trendCanvasRef = useRef(null);
   const expenseCanvasRef = useRef(null);
@@ -803,10 +880,15 @@ function Dashboard({
         </div>
       </div>
 
-      {/* SECCIÓN NEGOCIO */}
-      <div style={styles.sectionHeader}>
-        <Icon name="briefcase" size={17} color="#34D399" />
-        <span style={styles.sectionTitle}>Finanzas & Operación del Negocio</span>
+      {/* SECCIÓN 1: FINANZAS DEL NEGOCIO */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div style={styles.sectionHeader}>
+          <Icon name="briefcase" size={17} color="#34D399" />
+          <span style={styles.sectionTitle}>Finanzas & Operación del Negocio</span>
+        </div>
+        <button style={styles.sheetsExportBtn} onClick={onExportBusiness}>
+          <Icon name="file-spreadsheet" size={14} color="#34D399" /> Exportar a Sheets
+        </button>
       </div>
 
       <div style={styles.kpiGrid}>
@@ -871,15 +953,22 @@ function Dashboard({
         </div>
       </div>
 
-      {/* SECCIÓN PERSONAL */}
+      {/* SECCIÓN 2: ESPACIO & FINANZAS PERSONALES */}
       {canAccessPersonal && (
         <div style={{ marginTop: 28 }}>
-          <div style={{ ...styles.sectionHeader, borderLeftColor: "#A855F7" }}>
-            <Icon name="wallet" size={17} color="#C084FC" />
-            <span style={{ ...styles.sectionTitle, color: "#E9D5FF" }}>Espacio de Cosas Personales & Finanzas</span>
-            <button onClick={onGoToPersonal} style={styles.linkGlassBtn}>
-              Ver historial completo &rarr;
-            </button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ ...styles.sectionHeader, borderLeftColor: "#A855F7" }}>
+              <Icon name="wallet" size={17} color="#C084FC" />
+              <span style={{ ...styles.sectionTitle, color: "#E9D5FF" }}>Espacio de Cosas Personales & Finanzas</span>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={styles.purpleExportBtn} onClick={onExportPersonal}>
+                <Icon name="file-spreadsheet" size={14} color="#C084FC" /> Exportar Personal
+              </button>
+              <button onClick={onGoToPersonal} style={styles.linkGlassBtn}>
+                Ver historial completo &rarr;
+              </button>
+            </div>
           </div>
 
           <div style={styles.kpiGrid}>
@@ -964,7 +1053,7 @@ function Dashboard({
 }
 
 // ============ MÓDULO PERSONAL ============
-function PersonalFinancesManager({ personalFinances, income, expense, balance, onNew, onEdit, onDelete }) {
+function PersonalFinancesManager({ personalFinances, income, expense, balance, onNew, onEdit, onDelete, onExport }) {
   return (
     <div>
       <div style={styles.pageHeader}>
@@ -972,9 +1061,14 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
           <div style={{ ...styles.eyebrow, color: "#C084FC" }}>GESTIÓN INDEPENDIENTE</div>
           <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳</h2>
         </div>
-        <button style={styles.purpleBtn} onClick={onNew}>
-          <Icon name="plus" size={14} /> Registrar Movimiento
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button style={styles.purpleExportBtn} onClick={onExport}>
+            <Icon name="file-spreadsheet" size={14} color="#C084FC" /> Exportar a Google Sheets
+          </button>
+          <button style={styles.purpleBtn} onClick={onNew}>
+            <Icon name="plus" size={14} /> Registrar Movimiento
+          </button>
+        </div>
       </div>
 
       <div style={styles.kpiGrid}>
@@ -1048,7 +1142,7 @@ function PersonalFinancesManager({ personalFinances, income, expense, balance, o
 }
 
 // ============ GASTOS DEL NEGOCIO ============
-function GastosManager({ expenses, totalExpenses, onNew, onEdit, onDelete }) {
+function GastosManager({ expenses, totalExpenses, onNew, onEdit, onDelete, onExport }) {
   return (
     <div>
       <div style={styles.pageHeader}>
@@ -1056,9 +1150,14 @@ function GastosManager({ expenses, totalExpenses, onNew, onEdit, onDelete }) {
           <div style={styles.eyebrow}>CONTROL DE EGRESOS EMPRESARIALES</div>
           <h2 style={styles.pageTitle}>Registro de Gastos del Negocio</h2>
         </div>
-        <button style={styles.primaryBtn} onClick={onNew}>
-          <Icon name="plus" size={14} /> Registrar Gasto
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={styles.sheetsExportBtn} onClick={onExport} title="Exportar gastos a Google Sheets">
+            <Icon name="file-spreadsheet" size={14} color="#34D399" /> Exportar Sheets
+          </button>
+          <button style={styles.primaryBtn} onClick={onNew}>
+            <Icon name="plus" size={14} /> Registrar Gasto
+          </button>
+        </div>
       </div>
 
       <div style={styles.kpiGrid}>
@@ -1734,9 +1833,9 @@ const styles = {
   eyebrow: { color: "#34D399", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em" },
   pageTitle: { margin: "3px 0 0", fontSize: 22, fontWeight: 700, color: "#F8FAFC" },
 
-  sectionHeader: { display: "flex", alignItems: "center", gap: 9, marginBottom: 14, borderLeft: "3px solid #34D399", paddingLeft: 10 },
+  sectionHeader: { display: "flex", alignItems: "center", gap: 9, borderLeft: "3px solid #34D399", paddingLeft: 10 },
   sectionTitle: { fontSize: 14.5, fontWeight: 700, color: "#F1F5F9" },
-  linkGlassBtn: { marginLeft: "auto", background: "none", border: "none", color: "#C084FC", fontSize: 12, cursor: "pointer", fontWeight: 600 },
+  linkGlassBtn: { background: "none", border: "none", color: "#C084FC", fontSize: 12, cursor: "pointer", fontWeight: 600 },
 
   kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 },
   kpiCard: { 
@@ -1789,13 +1888,13 @@ const styles = {
     color: "#F8FAFC", 
     border: "1px solid rgba(255, 255, 255, 0.2)", 
     borderRadius: 8, 
-    padding: "9px 15px", 
+    padding: "8px 14px", 
     fontWeight: 600, 
     cursor: "pointer", 
     display: "inline-flex", 
     alignItems: "center", 
     gap: 7, 
-    fontSize: 13,
+    fontSize: 12.5,
     boxShadow: "0 4px 15px rgba(12, 79, 28, 0.4)"
   },
   purpleBtn: { 
@@ -1803,14 +1902,42 @@ const styles = {
     color: "#F8FAFC", 
     border: "1px solid rgba(255, 255, 255, 0.25)", 
     borderRadius: 8, 
-    padding: "9px 15px", 
+    padding: "8px 14px", 
     fontWeight: 600, 
     cursor: "pointer", 
     display: "inline-flex", 
     alignItems: "center", 
     gap: 7, 
-    fontSize: 13,
+    fontSize: 12.5,
     boxShadow: "0 4px 15px rgba(168, 85, 247, 0.35)"
+  },
+  sheetsExportBtn: {
+    background: "rgba(16, 185, 129, 0.12)",
+    color: "#34D399",
+    border: "1px solid rgba(52, 211, 153, 0.3)",
+    borderRadius: 8,
+    padding: "7px 12px",
+    fontWeight: 600,
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    transition: "all 0.2s"
+  },
+  purpleExportBtn: {
+    background: "rgba(168, 85, 247, 0.12)",
+    color: "#C084FC",
+    border: "1px solid rgba(168, 85, 247, 0.3)",
+    borderRadius: 8,
+    padding: "7px 12px",
+    fontWeight: 600,
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    transition: "all 0.2s"
   },
   secondaryBtn: { background: "rgba(255, 255, 255, 0.06)", color: "#E2E8F0", border: "1px solid rgba(255, 255, 255, 0.12)", borderRadius: 8, padding: "9px 15px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
   smallGlassBtn: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer" },
