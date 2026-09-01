@@ -120,7 +120,7 @@ const initialUsers = [
 ];
 
 const initialMockProducts = [
-  { id: "p1", name: "Polera Oversize Algodón", category: "Ropa", sku: "ROP-POL-101", barcode: "7801001", costPrice: 6500, salePrice: 14990, minStock: 5, stockByLocation: { "loc-central": 18, "loc-tienda": 4 } },
+  { id: "p1", name: "Polera Oversize Algodón", category: "Ropa", sku: "ROP-POL-101", barcode: "7801001", costPrice: 6500, salePrice: 14990, minStock: 5, stockByLocation: { "loc-central": 12, "loc-tienda": 4 } },
   { id: "p2", name: "Taza Cerámica Negra", category: "Bazar", sku: "BAZ-TAZ-202", barcode: "7802002", costPrice: 2100, salePrice: 5990, minStock: 6, stockByLocation: { "loc-central": 3, "loc-tienda": 1 } },
   { id: "p3", name: "Gorra Snapback Urbana", category: "Ropa", sku: "ROP-GOR-303", barcode: "7803003", costPrice: 4200, salePrice: 9990, minStock: 2, stockByLocation: { "loc-central": 12, "loc-tienda": 8 } }
 ];
@@ -153,7 +153,6 @@ const PRODUCT_CATEGORIES = ["Ropa", "Bazar", "Accesorios", "Calzado", "Electrón
 const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
 const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
-// Helper para formatear '2026-09' a 'Septiembre 2026'
 const formatMonthLabel = (ym) => {
   if (!ym) return "";
   const [year, month] = ym.split("-");
@@ -201,7 +200,6 @@ function App() {
   const [locations] = useState(defaultLocations);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Filtro de meses para Punto de Venta
   const [salesMonthFilter, setSalesMonthFilter] = useState("");
 
   // Modales
@@ -267,7 +265,6 @@ function App() {
     }
   };
 
-  // CRUD Inventario / Productos
   const handleSaveProduct = async (productData) => {
     let updatedEntry;
     if (productModalState === "new") {
@@ -306,7 +303,6 @@ function App() {
     }
   };
 
-  // CRUD Ventas
   const handleSaveSale = async (saleData) => {
     let updatedEntry;
     if (saleModalState === "new") {
@@ -334,7 +330,6 @@ function App() {
     }
   };
 
-  // CRUD Gastos Negocio
   const handleSaveExpense = async (expenseData) => {
     let updatedEntry;
     if (expenseModalState === "new") {
@@ -360,7 +355,6 @@ function App() {
     }
   };
 
-  // CRUD Clientes
   const handleSaveCustomer = async (customerData) => {
     let updatedEntry;
     if (customerModalState === "new") {
@@ -386,7 +380,6 @@ function App() {
     }
   };
 
-  // CRUD Finanzas Personales
   const handleSavePersonalFinance = async (itemData) => {
     let updatedEntry;
     if (personalModalState === "new") {
@@ -429,12 +422,10 @@ function App() {
   const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount || 0), 0);
   const profit = totalSales - totalExpenses;
 
-  // Métricas personales globales
   const personalIncome = personalFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
   const personalBalance = personalIncome - personalExpense;
 
-  // Meses disponibles para ventas
   const salesAvailableMonths = useMemo(() => {
     const currentYM = new Date().toISOString().slice(0, 7);
     const monthsSet = new Set(sales.map(s => (s.date || "").slice(0, 7)).filter(Boolean));
@@ -451,7 +442,6 @@ function App() {
     return filteredSales.reduce((a, s) => a + Number(s.total || 0), 0);
   }, [filteredSales]);
 
-  // Exportaciones
   const handleExportBusinessFinances = () => {
     const today = new Date().toISOString().slice(0, 10);
     const labelPeriodo = salesMonthFilter ? formatMonthLabel(salesMonthFilter) : "Historial Completo";
@@ -730,7 +720,6 @@ function App() {
                       <strong style={{ color: "#38BDF8" }}>{getProductTotalStock(p)} un.</strong>
                     </div>
 
-                    {/* Desglose por bodega */}
                     <div style={styles.stockByLocBox}>
                       {locations.map(loc => (
                         <div key={loc.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94A3B8", margin: "2px 0" }}>
@@ -786,7 +775,6 @@ function App() {
                 <h2 style={styles.pageTitle}>Registro de Ventas Comerciales</h2>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                {/* FILTRO POR MES EN VENTAS */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <Icon name="calendar" size={15} color="#38BDF8" />
                   <select 
@@ -1023,7 +1011,6 @@ function ProductModal({ product, locations, onClose, onSave }) {
             </div>
           </div>
 
-          {/* Existencias por cada almacén */}
           <div style={{ background: "rgba(255, 255, 255, 0.02)", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255, 255, 255, 0.08)", marginTop: 4 }}>
             <span style={{ fontSize: 11.5, color: "#38BDF8", fontWeight: 600, display: "block", marginBottom: 8 }}>
               Distribución de Existencias por Bodega:
@@ -1054,15 +1041,18 @@ function ProductModal({ product, locations, onClose, onSave }) {
   );
 }
 
-// ============ DASHBOARD ============
+// ============ DASHBOARD CON PROYECCIÓN DE GANANCIAS ============
 function Dashboard({ 
   currentUser, canAccessSales, canAccessPersonal, sales, expenses, products, lowStock, locations, customers, 
   totalSales, totalExpenses, profit, personalFinances, personalIncome, personalExpense, personalBalance,
   onNewSale, onNewPersonal, onGoToPersonal, onExportBusiness, onExportPersonal
 }) {
+  const [selectedProdFilter, setSelectedProdFilter] = useState("all");
+
   const trendCanvasRef = useRef(null);
   const expenseCanvasRef = useRef(null);
-  const chartRefs = useRef({ trend: null, expense: null });
+  const projectionCanvasRef = useRef(null);
+  const chartRefs = useRef({ trend: null, expense: null, projection: null });
 
   const last7Days = useMemo(() => {
     const days = [];
@@ -1088,9 +1078,58 @@ function Dashboard({
     return map;
   }, [expenses]);
 
+  // CÁLCULO DE PROYECCIÓN DE GANANCIAS EN INVENTARIO
+  const inventoryProjection = useMemo(() => {
+    if (selectedProdFilter === "all") {
+      let totalCost = 0;
+      let totalRevenue = 0;
+      let totalUnits = 0;
+
+      const itemBreakdown = products.map(p => {
+        const stock = getProductTotalStock(p);
+        const cost = (Number(p.costPrice) || 0) * stock;
+        const revenue = (Number(p.salePrice) || 0) * stock;
+        const profitVal = revenue - cost;
+        totalCost += cost;
+        totalRevenue += revenue;
+        totalUnits += stock;
+        return {
+          id: p.id,
+          name: p.name,
+          sku: p.sku,
+          stock,
+          cost,
+          revenue,
+          profit: profitVal,
+          unitCost: Number(p.costPrice) || 0,
+          unitSale: Number(p.salePrice) || 0,
+          unitProfit: (Number(p.salePrice) || 0) - (Number(p.costPrice) || 0)
+        };
+      });
+
+      const totalProfit = totalRevenue - totalCost;
+      const margin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+      return { isAll: true, totalCost, totalRevenue, totalProfit, totalUnits, margin, itemBreakdown };
+    } else {
+      const p = products.find(x => x.id === selectedProdFilter);
+      if (!p) return null;
+      const stock = getProductTotalStock(p);
+      const cost = (Number(p.costPrice) || 0) * stock;
+      const revenue = (Number(p.salePrice) || 0) * stock;
+      const profitVal = revenue - cost;
+      const unitCost = Number(p.costPrice) || 0;
+      const unitSale = Number(p.salePrice) || 0;
+      const unitProfit = unitSale - unitCost;
+      const margin = revenue > 0 ? (profitVal / revenue) * 100 : 0;
+      return { isAll: false, product: p, stock, cost, revenue, profit: profitVal, unitCost, unitSale, unitProfit, margin };
+    }
+  }, [products, selectedProdFilter]);
+
+  // RENDERIZADO DE GRÁFICOS
   useEffect(() => {
     if (!window.Chart) return;
 
+    // Gráfico 1: Ventas vs Gastos
     if (chartRefs.current.trend) chartRefs.current.trend.destroy();
     if (trendCanvasRef.current) {
       chartRefs.current.trend = new window.Chart(trendCanvasRef.current, {
@@ -1130,6 +1169,7 @@ function Dashboard({
       });
     }
 
+    // Gráfico 2: Gastos por Categoría
     if (chartRefs.current.expense) chartRefs.current.expense.destroy();
     if (expenseCanvasRef.current) {
       const labels = Object.keys(expensesByCategory);
@@ -1153,11 +1193,98 @@ function Dashboard({
       });
     }
 
+    // Gráfico 3: Proyección de Ganancias (Costo vs Ganancia Neta)
+    if (chartRefs.current.projection) chartRefs.current.projection.destroy();
+    if (projectionCanvasRef.current && inventoryProjection) {
+      if (inventoryProjection.isAll) {
+        const topItems = inventoryProjection.itemBreakdown.slice(0, 8);
+        chartRefs.current.projection = new window.Chart(projectionCanvasRef.current, {
+          type: "bar",
+          data: {
+            labels: topItems.map(i => i.name.length > 14 ? i.name.slice(0, 14) + "…" : i.name),
+            datasets: [
+              {
+                label: "Costo Invertido ($)",
+                data: topItems.map(i => i.cost),
+                backgroundColor: "rgba(248, 113, 113, 0.75)",
+                borderRadius: 5
+              },
+              {
+                label: "Ganancia Neta Posible ($)",
+                data: topItems.map(i => i.profit),
+                backgroundColor: "rgba(52, 211, 153, 0.85)",
+                borderRadius: 5
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: "#CBD5E1", font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    return `${context.dataset.label}: ${money(context.raw)}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: { ticks: { color: "#94A3B8", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } },
+              y: { ticks: { color: "#94A3B8", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } }
+            }
+          }
+        });
+      } else {
+        // Vista para producto individual: Comparativa Unitario vs Total Stock
+        chartRefs.current.projection = new window.Chart(projectionCanvasRef.current, {
+          type: "bar",
+          data: {
+            labels: ["Por Unidad", `Total (${inventoryProjection.stock} un.)`],
+            datasets: [
+              {
+                label: "Costo ($)",
+                data: [inventoryProjection.unitCost, inventoryProjection.cost],
+                backgroundColor: "rgba(248, 113, 113, 0.75)",
+                borderRadius: 6
+              },
+              {
+                label: "Ganancia Neta ($)",
+                data: [inventoryProjection.unitProfit, inventoryProjection.profit],
+                backgroundColor: "rgba(52, 211, 153, 0.85)",
+                borderRadius: 6
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: "#CBD5E1", font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    return `${context.dataset.label}: ${money(context.raw)}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: { ticks: { color: "#F8FAFC", font: { size: 11 } }, grid: { display: false } },
+              y: { ticks: { color: "#94A3B8", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } }
+            }
+          }
+        });
+      }
+    }
+
     return () => {
       if (chartRefs.current.trend) chartRefs.current.trend.destroy();
       if (chartRefs.current.expense) chartRefs.current.expense.destroy();
+      if (chartRefs.current.projection) chartRefs.current.projection.destroy();
     };
-  }, [salesByDay, expensesByDay, expensesByCategory, last7Days]);
+  }, [salesByDay, expensesByDay, expensesByCategory, last7Days, inventoryProjection]);
 
   return (
     <div>
@@ -1228,6 +1355,82 @@ function Dashboard({
           <span style={{ ...styles.kpiSub, color: lowStock.length > 0 ? "#F87171" : "#34D399" }}>
             {lowStock.length > 0 ? `⚠️ ${lowStock.length} con stock bajo` : "✓ Stock en óptimo estado"}
           </span>
+        </div>
+      </div>
+
+      {/* NUEVO PANEL: PROYECCIÓN DE GANANCIAS EN INVENTARIO */}
+      <div style={{ ...styles.panel, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="calculator" size={18} color="#34D399" />
+              <h3 style={{ margin: 0, fontSize: 15, color: "#F1F5F9", fontWeight: 700 }}>
+                Proyección de Ganancias si se vende todo el Inventario
+              </h3>
+            </div>
+            <p style={{ margin: "2px 0 0", fontSize: 11.5, color: "#94A3B8" }}>
+              Cálculo de retorno estimado en base al costo unitario, precio de venta y stock total.
+            </p>
+          </div>
+
+          {/* FILTRO POR OBJETO / PRODUCTO */}
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span style={{ fontSize: 12, color: "#94A3B8" }}>Ver producto:</span>
+            <select 
+              style={styles.filterSelect} 
+              value={selectedProdFilter} 
+              onChange={e => setSelectedProdFilter(e.target.value)}
+            >
+              <option value="all">📦 Todo el Inventario Global</option>
+              {products.map(p => (
+                <option key={p.id} value={p.id}>{p.name} ({getProductTotalStock(p)} un.)</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* MÉTRICAS DE PROYECCIÓN */}
+        {inventoryProjection && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: 10, marginBottom: 14 }}>
+            <div style={styles.miniProjectionCard}>
+              <span style={styles.miniLabel}>Costo Invertido (Stock)</span>
+              <strong style={{ color: "#F87171", fontSize: 15 }}>
+                {money(inventoryProjection.cost || inventoryProjection.totalCost)}
+              </strong>
+              <span style={{ fontSize: 10, color: "#64748B" }}>Dinero retenido en costo</span>
+            </div>
+
+            <div style={styles.miniProjectionCard}>
+              <span style={styles.miniLabel}>Venta Bruta Estimada</span>
+              <strong style={{ color: "#38BDF8", fontSize: 15 }}>
+                {money(inventoryProjection.revenue || inventoryProjection.totalRevenue)}
+              </strong>
+              <span style={{ fontSize: 10, color: "#64748B" }}>Ingreso total al liquidar</span>
+            </div>
+
+            <div style={{ ...styles.miniProjectionCard, background: "rgba(52, 211, 153, 0.08)", borderColor: "rgba(52, 211, 153, 0.3)" }}>
+              <span style={{ ...styles.miniLabel, color: "#34D399" }}>Ganancia Neta Posible</span>
+              <strong style={{ color: "#34D399", fontSize: 17 }}>
+                +{money(inventoryProjection.profit || inventoryProjection.totalProfit)}
+              </strong>
+              <span style={{ fontSize: 10, color: "#34D399" }}>Utilidad líquida a cobrar</span>
+            </div>
+
+            <div style={styles.miniProjectionCard}>
+              <span style={styles.miniLabel}>Margen de Ganancia</span>
+              <strong style={{ color: "#FBBF24", fontSize: 15 }}>
+                {inventoryProjection.margin.toFixed(1)}%
+              </strong>
+              <span style={{ fontSize: 10, color: "#64748B" }}>
+                {!inventoryProjection.isAll ? `+${money(inventoryProjection.unitProfit)} /un.` : `${inventoryProjection.totalUnits} un. totales`}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* GRÁFICO DE PROYECCIÓN */}
+        <div style={{ height: 210 }}>
+          <canvas ref={projectionCanvasRef}></canvas>
         </div>
       </div>
 
@@ -1388,7 +1591,6 @@ function PersonalFinancesManager({ personalFinances, onNew, onEdit, onDelete, on
           <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳</h2>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          {/* FILTRO POR MES PERSONAL */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Icon name="calendar" size={15} color="#C084FC" />
             <select 
@@ -2230,6 +2432,17 @@ const styles = {
   kpiLabel: { color: "#94A3B8", fontSize: 12, fontWeight: 500 },
   kpiValue: { fontSize: 21, fontWeight: 700, marginTop: 6, letterSpacing: "-0.02em" },
   kpiSub: { fontSize: 11, color: "#64748B", marginTop: 4, display: "block" },
+
+  miniProjectionCard: {
+    background: "rgba(255, 255, 255, 0.03)",
+    border: "1px solid rgba(255, 255, 255, 0.08)",
+    borderRadius: 10,
+    padding: "10px 12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 2
+  },
+  miniLabel: { fontSize: 11, color: "#94A3B8", fontWeight: 500 },
 
   dashGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
   panel: { 
