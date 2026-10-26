@@ -9,8 +9,8 @@
   <!-- Supabase Client CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- React & Babel CDN -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -29,7 +29,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      padding: 18px;
+      padding: 20px;
       font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       color: #F1F5F9;
       overflow-x: hidden;
@@ -37,13 +37,13 @@
       transition: background 0.3s ease;
     }
     body[data-warehouse-theme="warm"] {
-      background: #14110d;
+      background: #120f0b;
     }
     /* Orbes de luz ambiental de fondo para efecto Glassmorphism */
     .ambient-orb {
       position: fixed;
       border-radius: 50%;
-      filter: blur(105px);
+      filter: blur(100px);
       pointer-events: none;
       z-index: 0;
       opacity: 0.45;
@@ -62,16 +62,12 @@
     }
     #root {
       width: 100%;
-      max-width: 1360px;
+      max-width: 1320px;
       z-index: 1;
       position: relative;
     }
     input, select, button, textarea {
       font-family: inherit;
-    }
-    input:focus, select:focus, textarea:focus {
-      border-color: #34D399 !important;
-      box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.2);
     }
     option {
       background-color: #0f172a;
@@ -87,31 +83,39 @@
   <div class="ambient-orb orb-1"></div>
   <div class="ambient-orb orb-2"></div>
   <div class="ambient-orb orb-3"></div>
+
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    // ============ CONFIGURACIÓN DE SUPABASE ============
+    // CONFIGURACIÓN DE SUPABASE
     const SUPABASE_URL = "https://bcnkbsiqrcoosasjlypc.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJjbmtic2lxcmNvb3Nhc2pseXBjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1ODA3NTYsImV4cCI6MjEwMzE1Njc1Nn0._MLWTyHL7fBIhYhIwvrguIcDqwz7D9uFoRSCbqPo6pU";
 
     const isSupabaseConfigured = SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes("TU-PROYECTO");
     const supabase = isSupabaseConfigured && window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    // Iconos seguros para evitar conflictos de DOM en React
-    const Icon = ({ name, size = 16, color = "currentColor", style = {}, ...props }) => {
-      const iconRef = useRef(null);
+    // Componente Icon seguro para React 18 + Lucide CDN (envuelto en span para que React nunca falle al desmontar)
+    const Icon = ({ name, size = 16, color = "currentColor", ...props }) => {
+      const wrapperRef = useRef(null);
       useEffect(() => {
-        if (window.lucide && iconRef.current) {
-          iconRef.current.innerHTML = `<i data-lucide="${name}" style="width:${size}px;height:${size}px;color:${color};display:inline-flex;vertical-align:middle;"></i>`;
-          window.lucide.createIcons({ root: iconRef.current });
+        if (wrapperRef.current) {
+          wrapperRef.current.innerHTML = `<i data-lucide="${name}"></i>`;
+          if (window.lucide) {
+            try { window.lucide.createIcons(); } catch (e) {}
+          }
         }
       }, [name, size, color]);
-      return <span ref={iconRef} style={{ display: "inline-flex", alignItems: "center", verticalAlign: "middle", ...style }} {...props}></span>;
+      return (
+        <span
+          ref={wrapperRef}
+          style={{ width: size, height: size, color, display: "inline-flex", alignItems: "center", justifyContent: "center", verticalAlign: "middle" }}
+          {...props}
+        />
+      );
     };
 
-    // ============ CLAVES DE ALMACENAMIENTO Y SEGURIDAD ============
     const AUTH_STORAGE_KEY = "negocio_active_user_v2";
     const LOCAL_BACKUP_KEY = "negocio_local_cache_v2";
     const PERMS_STORAGE_KEY = "negocio_role_perms_v2";
@@ -119,16 +123,17 @@
     const LOGIN_LOCKS_KEY = "negocio_login_locks_v2";
     const THEME_MODE_KEY = "negocio_warehouse_theme_v2";
 
-    // Sanitización contra XSS e inyección
     const sanitizeText = (val) => String(val ?? "").replace(/[<>]/g, "").trim();
 
-    // Hash SHA-256 con soporte retrocompatible para contraseñas previas
     async function hashPassword(plain, salt = "almacen_supabase_salt_v2") {
       try {
-        const data = new TextEncoder().encode(`${salt}::${plain}`);
-        const digest = await crypto.subtle.digest("SHA-256", data);
+        if (!window.crypto || !window.crypto.subtle) {
+          return "sha256$" + btoa(unescape(encodeURIComponent(salt + plain)));
+        }
+        const data = new TextEncoder().encode(salt + "::" + plain);
+        const digest = await window.crypto.subtle.digest("SHA-256", data);
         return "sha256$" + Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
-      } catch {
+      } catch (e) {
         return "sha256$" + btoa(unescape(encodeURIComponent(salt + plain)));
       }
     }
@@ -143,7 +148,6 @@
       return stored === inputPlain;
     }
 
-    // ============ DATOS INICIALES Y CONSTANTES ============
     const defaultLocations = [
       { id: "loc-central", name: "Bodega Central" },
       { id: "loc-tienda", name: "Tienda Principal" }
@@ -183,7 +187,6 @@
       { id: "pf-3", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Servicios Personales", description: "Plan de Telefonía y Streaming", amount: 22990 }
     ];
 
-    // Matriz de permisos configurable por rol
     const defaultRolePermissions = {
       Administrador: {
         dashboard: true, personal: true, inventario: true, bodegas: true,
@@ -225,7 +228,6 @@
       return `${monthNames[mIdx] || month} ${year}`;
     };
 
-    // Exportación segura contra CSV Injection (fórmulas maliciosas =, +, -, @)
     function exportToGoogleSheetsCSV(filename, rows) {
       const csvContent = "\uFEFF" + rows.map(row =>
         row.map(cell => {
@@ -248,7 +250,6 @@
       document.body.removeChild(link);
     }
 
-    // ============ COMPONENTE PRINCIPAL APP ============
     function App() {
       const [currentUser, setCurrentUser] = useState(() => {
         try {
@@ -260,12 +261,11 @@
         }
       });
 
-      // Carga inicial con respaldo local por si Supabase está sin conexión
       const cachedData = useMemo(() => {
         try {
           const raw = localStorage.getItem(LOCAL_BACKUP_KEY);
           return raw ? JSON.parse(raw) : null;
-        } catch {
+        } catch (e) {
           return null;
         }
       }, []);
@@ -281,7 +281,7 @@
         try {
           const saved = localStorage.getItem(PERMS_STORAGE_KEY);
           return saved ? { ...defaultRolePermissions, ...JSON.parse(saved) } : defaultRolePermissions;
-        } catch {
+        } catch (e) {
           return defaultRolePermissions;
         }
       });
@@ -290,7 +290,7 @@
         try {
           const saved = localStorage.getItem(AUDIT_STORAGE_KEY);
           return saved ? JSON.parse(saved) : [];
-        } catch {
+        } catch (e) {
           return [];
         }
       });
@@ -328,17 +328,16 @@
         };
         setAuditLog(prev => {
           const updated = [item, ...prev.slice(0, 149)];
-          localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(updated));
+          try { localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(updated)); } catch (e) {}
           return updated;
         });
       }, [currentUser]);
 
       useEffect(() => {
         document.body.setAttribute("data-warehouse-theme", warehouseTheme);
-        localStorage.setItem(THEME_MODE_KEY, warehouseTheme);
+        try { localStorage.setItem(THEME_MODE_KEY, warehouseTheme); } catch (e) {}
       }, [warehouseTheme]);
 
-      // Guardar caché local híbrido
       useEffect(() => {
         try {
           localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify({
@@ -348,7 +347,7 @@
       }, [users, products, sales, expenses, customers, personalFinances]);
 
       useEffect(() => {
-        localStorage.setItem(PERMS_STORAGE_KEY, JSON.stringify(rolePermissions));
+        try { localStorage.setItem(PERMS_STORAGE_KEY, JSON.stringify(rolePermissions)); } catch (e) {}
       }, [rolePermissions]);
 
       const fetchDataFromSupabase = useCallback(async () => {
@@ -388,18 +387,21 @@
         } else {
           localStorage.removeItem(AUTH_STORAGE_KEY);
         }
-      }, [currentUser]);
+        if (window.lucide) {
+          try { window.lucide.createIcons(); } catch (e) {}
+        }
+      }, [currentUser, tab, sales, products, personalFinances, salesMonthFilter]);
 
-      // Cierre automático por inactividad (15 minutos)
+      // Cierre automático por inactividad (15 min)
       useEffect(() => {
         if (!currentUser) return;
         let inactivityTimer;
         const resetInactivity = () => {
           clearTimeout(inactivityTimer);
           inactivityTimer = setTimeout(() => {
-            registerAudit("Sesión Expirada", "Cierre automático tras 15 minutos de inactividad");
+            registerAudit("Sesión Expirada", "Cierre automático tras 15 minutos sin actividad");
             setCurrentUser(null);
-            notify("Sesión cerrada por inactividad para proteger el almacén", "warn");
+            notify("Sesión cerrada por inactividad", "warn");
           }, 15 * 60 * 1000);
         };
         window.addEventListener("mousemove", resetInactivity);
@@ -446,19 +448,19 @@
       const handleLogin = (userObj) => {
         setCurrentUser(userObj);
         setTab("dashboard");
-        registerAudit("Inicio de Sesión", `Ingreso con perfil ${userObj.role}`, userObj.name);
-        notify(`Bienvenido al almacén, ${userObj.name}`);
+        registerAudit("Inicio de Sesión", `Ingreso con rol ${userObj.role}`, userObj.name);
+        notify(`Bienvenido, ${userObj.name}`);
       };
 
       const handleLogout = () => {
-        registerAudit("Cierre de Sesión", "Salida manual del sistema");
+        registerAudit("Cierre de Sesión", "Salida manual del usuario");
         setCurrentUser(null);
       };
 
       const handleRegister = async (newUser) => {
         setUsers(prev => [...prev, newUser]);
         setCurrentUser(newUser);
-        registerAudit("Registro de Cuenta", `Nueva cuenta creada: ${newUser.email} (${newUser.role})`, newUser.name);
+        registerAudit("Registro de Usuario", `${newUser.email} (${newUser.role})`, newUser.name);
         if (supabase) {
           await supabase.from("usuarios").insert([newUser]);
         }
@@ -469,12 +471,12 @@
         if (productModalState === "new") {
           updatedEntry = { ...productData, id: "p-" + Date.now() };
           setProducts(prev => [updatedEntry, ...prev]);
-          registerAudit("Producto Creado", `${updatedEntry.name} (SKU: ${updatedEntry.sku})`);
-          notify("Producto agregado al inventario");
+          registerAudit("Producto Creado", `${updatedEntry.name} (${updatedEntry.sku})`);
+          notify("Producto agregado al almacén");
         } else {
           updatedEntry = { ...productData, id: productModalState.id };
           setProducts(prev => prev.map(p => p.id === productModalState.id ? updatedEntry : p));
-          registerAudit("Producto Modificado", `${updatedEntry.name} (SKU: ${updatedEntry.sku})`);
+          registerAudit("Producto Modificado", `${updatedEntry.name} (${updatedEntry.sku})`);
           notify("Ficha de producto actualizada");
         }
         setProductModalState(null);
@@ -485,10 +487,10 @@
       };
 
       const handleDeleteProduct = async (productId) => {
-        const target = products.find(p => p.id === productId);
-        if (confirm(`¿Estás seguro de eliminar "${target?.name || "este producto"}" del inventario?`)) {
+        if (confirm("¿Estás seguro de eliminar este producto del inventario?")) {
+          const target = products.find(p => p.id === productId);
           setProducts(prev => prev.filter(p => p.id !== productId));
-          registerAudit("Producto Eliminado", `${target?.name || productId}`);
+          registerAudit("Producto Eliminado", target?.name || productId);
           notify("Producto eliminado", "warn");
           if (supabase) {
             await supabase.from("productos").delete().eq("id", productId);
@@ -496,13 +498,12 @@
         }
       };
 
-      // Traspaso directo entre Bodega Central y Tienda Principal
       const handleTransferStock = async ({ productId, fromLocId, toLocId, qty }) => {
         const prod = products.find(p => p.id === productId);
         if (!prod) return;
         const currentFrom = Number(prod.stockByLocation?.[fromLocId] || 0);
         if (qty <= 0 || qty > currentFrom) {
-          notify("No hay stock suficiente en la bodega de origen", "warn");
+          notify("Stock insuficiente en la bodega de origen", "warn");
           return;
         }
         const updatedProduct = {
@@ -514,8 +515,8 @@
           }
         };
         setProducts(prev => prev.map(p => p.id === productId ? updatedProduct : p));
-        registerAudit("Traspaso de Bodega", `${qty} un. de ${prod.name} (${fromLocId} → ${toLocId})`);
-        notify(`Traspaso de ${qty} un. realizado con éxito`);
+        registerAudit("Traspaso de Bodega", `${qty} un. de ${prod.name}`);
+        notify(`Traspaso de ${qty} un. completado`);
         setTransferModalOpen(false);
         if (supabase) {
           await supabase.from("productos").upsert([updatedProduct]);
@@ -525,7 +526,7 @@
       const ensureCustomerExists = async (name) => {
         const trimmed = sanitizeText(name);
         if (!trimmed) return;
-        const exists = customers.some(c => c.name.toLowerCase() === trimmed.toLowerCase());
+        const exists = customers.some(c => (c.name || "").toLowerCase() === trimmed.toLowerCase());
         if (exists) return;
 
         const newCustomer = { id: "c-" + Date.now(), name: trimmed, phone: "" };
@@ -540,16 +541,15 @@
         if (saleModalState === "new") {
           updatedEntry = { ...saleData, id: "s-" + Date.now() };
           setSales(prev => [updatedEntry, ...prev]);
-          registerAudit("Venta Registrada", `${money(updatedEntry.total)} - Cliente: ${updatedEntry.customerName}`);
+          registerAudit("Venta Registrada", `${money(updatedEntry.total)} - ${updatedEntry.customerName}`);
           notify("Venta registrada en caja");
         } else {
           updatedEntry = { ...saleData, id: saleModalState.id };
           setSales(prev => prev.map(s => s.id === saleModalState.id ? updatedEntry : s));
-          registerAudit("Venta Modificada", `${money(updatedEntry.total)} - Cliente: ${updatedEntry.customerName}`);
-          notify("Registro de venta actualizado");
+          registerAudit("Venta Modificada", `${money(updatedEntry.total)} - ${updatedEntry.customerName}`);
+          notify("Venta modificada");
         }
 
-        // Si el usuario seleccionó descontar producto del almacén al registrar la venta
         if (stockDeduction && stockDeduction.productId && stockDeduction.qty > 0) {
           const targetProd = products.find(p => p.id === stockDeduction.productId);
           if (targetProd) {
@@ -579,9 +579,8 @@
 
       const handleDeleteSale = async (saleId) => {
         if (confirm("¿Estás seguro de eliminar esta venta del registro?")) {
-          const target = sales.find(s => s.id === saleId);
           setSales(prev => prev.filter(s => s.id !== saleId));
-          registerAudit("Venta Eliminada", `${target?.customerName || saleId} (${money(target?.total || 0)})`);
+          registerAudit("Venta Eliminada", saleId);
           notify("Venta eliminada", "warn");
           if (supabase) {
             await supabase.from("ventas").delete().eq("id", saleId);
@@ -595,11 +594,10 @@
           updatedEntry = { ...expenseData, id: "e-" + Date.now() };
           setExpenses(prev => [updatedEntry, ...prev]);
           registerAudit("Gasto Registrado", `${updatedEntry.category}: ${money(updatedEntry.amount)}`);
-          notify("Gasto comercial registrado");
+          notify("Gasto registrado");
         } else {
           updatedEntry = { ...expenseData, id: expenseModalState.id };
           setExpenses(prev => prev.map(e => e.id === expenseModalState.id ? updatedEntry : e));
-          registerAudit("Gasto Modificado", `${updatedEntry.category}: ${money(updatedEntry.amount)}`);
           notify("Gasto actualizado");
         }
         setExpenseModalState(null);
@@ -612,7 +610,6 @@
       const handleDeleteExpense = async (expenseId) => {
         if (confirm("¿Estás seguro de eliminar este gasto del registro?")) {
           setExpenses(prev => prev.filter(e => e.id !== expenseId));
-          registerAudit("Gasto Eliminado", `ID: ${expenseId}`);
           notify("Gasto eliminado", "warn");
           if (supabase) {
             await supabase.from("gastos").delete().eq("id", expenseId);
@@ -625,11 +622,11 @@
         if (customerModalState === "new") {
           updatedEntry = { ...customerData, id: "c-" + Date.now() };
           setCustomers(prev => [updatedEntry, ...prev]);
-          notify("Cliente agregado a la cartera");
+          notify("Cliente guardado");
         } else {
           updatedEntry = { ...customerData, id: customerModalState.id };
           setCustomers(prev => prev.map(c => c.id === customerModalState.id ? updatedEntry : c));
-          notify("Datos del cliente actualizados");
+          notify("Cliente actualizado");
         }
         setCustomerModalState(null);
 
@@ -669,7 +666,7 @@
       const handleDeletePersonalFinance = async (id) => {
         if (confirm("¿Eliminar este movimiento de tus finanzas personales?")) {
           setPersonalFinances(prev => prev.filter(i => i.id !== id));
-          notify("Movimiento personal eliminado", "warn");
+          notify("Movimiento eliminado", "warn");
           if (supabase) {
             await supabase.from("finanzas_personales").delete().eq("id", id);
           }
@@ -758,12 +755,11 @@
           ["CATÁLOGO DE PRODUCTOS E INVENTARIO", "", "", "", "", ""],
           ["Fecha de Exportación:", today, "", "", "", ""],
           [""],
-          ["Nombre", "Categoría", "SKU", "Código Barras", "Costo ($)", "Precio Venta ($)", "Stock Total", "Stock Mínimo"],
+          ["Nombre", "Categoría", "SKU", "Costo ($)", "Precio Venta ($)", "Stock Total", "Stock Mínimo"],
           ...products.map(p => [
             p.name,
             p.category,
             p.sku,
-            p.barcode || "-",
             canViewCosts ? p.costPrice : "Restringido",
             p.salePrice,
             getProductTotalStock(p),
@@ -794,10 +790,10 @@
                 src="logo.png"
                 alt="Logo Almacén"
                 onError={(e) => { e.target.style.display = "none"; }}
-                style={{ width: 36, height: 36, objectFit: "contain", borderRadius: 8 }}
+                style={{ width: 36, height: 36, objectFit: "contain" }}
               />
               <div style={{ flex: 1 }}>
-                <div style={styles.brandTitle}>Almacén PRO</div>
+                <div style={styles.brandTitle}>Almacén</div>
                 <div style={styles.brandSub}>
                   {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
                 </div>
@@ -805,7 +801,7 @@
               <button
                 onClick={() => setWarehouseTheme(prev => prev === "warm" ? "cool" : "warm")}
                 style={styles.themeToggleBtn}
-                title={warehouseTheme === "warm" ? "Cambiar a Cristal Frío" : "Cambiar a Almacén Cálido"}
+                title="Cambiar ambiente visual del almacén"
               >
                 <Icon name={warehouseTheme === "warm" ? "flame" : "sparkles"} size={14} color={warehouseTheme === "warm" ? "#FBBF24" : "#38BDF8"} />
               </button>
@@ -813,11 +809,11 @@
 
             <div style={styles.userCard}>
               <div style={styles.userAvatar}>
-                {currentUser.name.slice(0, 2).toUpperCase()}
+                {(currentUser.name || "US").slice(0, 2).toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={styles.userName}>{currentUser.name}</div>
-                <span style={{ ...styles.roleBadge, color: role === "Personal" ? "#C084FC" : "#FBBF24" }}>
+                <span style={{ ...styles.roleBadge, color: role === "Personal" ? "#C084FC" : "#34D399" }}>
                   {currentUser.role}
                 </span>
               </div>
@@ -840,13 +836,11 @@
                 </button>
               )}
 
-              {activePerms.inventario && (
-                <button onClick={() => setTab("inventario")} style={{ ...styles.navItem, ...(tab === "inventario" ? styles.navItemActive : {}) }}>
-                  <Icon name="package" size={16} />
-                  <span>Inventario & Etiquetas</span>
-                  {lowStock.length > 0 && <span style={styles.navBadge}>{lowStock.length}</span>}
-                </button>
-              )}
+              <button onClick={() => setTab("inventario")} style={{ ...styles.navItem, ...(tab === "inventario" ? styles.navItemActive : {}) }}>
+                <Icon name="package" size={16} />
+                <span>Inventario</span>
+                {lowStock.length > 0 && <span style={styles.navBadge}>{lowStock.length}</span>}
+              </button>
 
               {canAccessWarehouses && (
                 <button onClick={() => setTab("bodegas")} style={{ ...styles.navItem, ...(tab === "bodegas" ? styles.navItemActive : {}) }}>
@@ -876,10 +870,10 @@
                 </button>
               )}
 
-              {role === "Administrador" && (
+              {(role === "Administrador") && (
                 <button onClick={() => setTab("usuarios")} style={{ ...styles.navItem, ...(tab === "usuarios" ? styles.navItemActive : {}) }}>
                   <Icon name="shield-check" size={16} />
-                  <span>Equipo & Seguridad</span>
+                  <span>Equipo & Roles</span>
                 </button>
               )}
             </nav>
@@ -890,7 +884,7 @@
                 {isSyncing ? "Sincronizando..." : currentUser.email}
               </span>
               {isSupabaseConfigured && (
-                <button onClick={fetchDataFromSupabase} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", color: "#94A3B8" }} title="Sincronizar con Supabase">
+                <button onClick={fetchDataFromSupabase} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", color: "#94A3B8" }} title="Actualizar datos">
                   <Icon name="refresh-cw" size={12} />
                 </button>
               )}
@@ -940,7 +934,7 @@
               <div>
                 <div style={styles.pageHeader}>
                   <div>
-                    <div style={styles.eyebrow}>ESTANTERÍA DEL ALMACÉN & CATÁLOGO</div>
+                    <div style={styles.eyebrow}>INVENTARIO & CATÁLOGO DE ALMACÉN</div>
                     <h2 style={styles.pageTitle}>Fichas de Productos y Existencias</h2>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -955,12 +949,12 @@
                   </div>
                 </div>
 
-                {/* Barra de búsqueda rápida de almacén (Lector código de barras / SKU / Categoría) */}
-                <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
-                  <div style={{ flex: 1, minWidth: 240, position: "relative" }}>
+                {/* Buscador rápido de Almacén por Nombre, SKU o Código de Barras */}
+                <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 230 }}>
                     <input
                       style={styles.glassInput}
-                      placeholder="🔍 Buscar producto por nombre, SKU o pistolear Código de Barras..."
+                      placeholder="🔍 Buscar en estantería por nombre, SKU o Código de Barras..."
                       value={inventorySearch}
                       onChange={e => setInventorySearch(e.target.value)}
                     />
@@ -977,84 +971,69 @@
 
                 {filteredInventory.length === 0 ? (
                   <div style={styles.panel}>
-                    <p style={{ textAlign: "center", color: "#94A3B8", margin: 20 }}>
-                      No se encontraron productos con ese criterio en el almacén.
+                    <p style={{ textAlign: "center", color: "#64748B", margin: 20 }}>
+                      No hay productos que coincidan con la búsqueda.
                     </p>
                   </div>
                 ) : (
                   <div style={styles.tagGrid}>
-                    {filteredInventory.map(p => {
-                      const totalStock = getProductTotalStock(p);
-                      const isCritical = totalStock <= (p.minStock || 0);
-                      const unitMargin = (Number(p.salePrice) || 0) - (Number(p.costPrice) || 0);
-                      return (
-                        <div key={p.id} style={{
-                          ...styles.productGlassCard,
-                          borderColor: isCritical ? "rgba(248, 113, 113, 0.4)" : "rgba(251, 191, 36, 0.22)"
-                        }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={styles.categoryBadge}>{p.category}</span>
-                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                              {isCritical ? (
-                                <span style={styles.stockLowBadge}>⚠️ Reponer ({totalStock})</span>
-                              ) : (
-                                <span style={styles.stockOkBadge}>✓ En Estante</span>
-                              )}
-                              {canManageInventory && (
-                                <>
-                                  <button style={styles.actionIconBtn} onClick={() => setProductModalState(p)} title="Modificar Producto">
-                                    <Icon name="pencil" size={13} color="#FBBF24" />
-                                  </button>
-                                  <button style={styles.actionIconBtn} onClick={() => handleDeleteProduct(p.id)} title="Eliminar Producto">
-                                    <Icon name="trash-2" size={13} color="#F87171" />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          <div style={{ fontSize: 16.5, fontWeight: 700, margin: "10px 0 3px", color: "#F8FAFC" }}>{p.name}</div>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94A3B8", fontFamily: "monospace" }}>
-                            <span>SKU: {p.sku || "-"}</span>
-                            {p.barcode && <span>║▌║ {p.barcode}</span>}
-                          </div>
-
-                          <div style={styles.cardDivider}></div>
-
-                          <div style={styles.tagRow}>
-                            <span>Precio Mostrador:</span>
-                            <strong style={{ color: "#34D399", fontSize: 15 }}>{money(p.salePrice)}</strong>
-                          </div>
-                          {canViewCosts && (
-                            <>
-                              <div style={styles.tagRow}>
-                                <span>Costo Unitario:</span>
-                                <span>{money(p.costPrice)}</span>
-                              </div>
-                              <div style={styles.tagRow}>
-                                <span>Ganancia x Unidad:</span>
-                                <span style={{ color: "#FBBF24", fontWeight: 600 }}>+{money(unitMargin)}</span>
-                              </div>
-                            </>
-                          )}
-                          <div style={styles.tagRow}>
-                            <span>Stock Total Almacén:</span>
-                            <strong style={{ color: isCritical ? "#F87171" : "#38BDF8" }}>
-                              {totalStock} un. (mín. {p.minStock || 0})
-                            </strong>
-                          </div>
-
-                          <div style={styles.stockByLocBox}>
-                            {locations.map(loc => (
-                              <div key={loc.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#CBD5E1", margin: "3px 0" }}>
-                                <span>📍 {loc.name}:</span>
-                                <strong style={{ color: "#F8FAFC" }}>{p.stockByLocation?.[loc.id] || 0} un.</strong>
-                              </div>
-                            ))}
+                    {filteredInventory.map(p => (
+                      <div key={p.id} style={styles.productGlassCard}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={styles.categoryBadge}>{p.category}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            {getProductTotalStock(p) <= p.minStock && (
+                              <span style={styles.stockLowBadge}>Stock Crítico</span>
+                            )}
+                            {canManageInventory && (
+                              <>
+                                <button style={styles.actionIconBtn} onClick={() => setProductModalState(p)} title="Modificar Producto">
+                                  <Icon name="pencil" size={13} color="#38BDF8" />
+                                </button>
+                                <button style={styles.actionIconBtn} onClick={() => handleDeleteProduct(p.id)} title="Eliminar Producto">
+                                  <Icon name="trash-2" size={13} color="#F87171" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
-                      );
-                    })}
+
+                        <div style={{ fontSize: 16, fontWeight: 700, margin: "10px 0 2px", color: "#F8FAFC" }}>{p.name}</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94A3B8", fontFamily: "monospace" }}>
+                          <span>SKU: {p.sku || "-"}</span>
+                          {p.barcode && <span>EAN: {p.barcode}</span>}
+                        </div>
+                        <div style={styles.cardDivider}></div>
+
+                        <div style={styles.tagRow}>
+                          <span>Precio Venta:</span>
+                          <strong style={{ color: "#34D399" }}>{money(p.salePrice)}</strong>
+                        </div>
+                        {canViewCosts && (
+                          <div style={styles.tagRow}>
+                            <span>Costo Unitario:</span>
+                            <span>{money(p.costPrice)}</span>
+                          </div>
+                        )}
+                        <div style={styles.tagRow}>
+                          <span>Stock Mínimo:</span>
+                          <span style={{ color: "#94A3B8" }}>{p.minStock || 0} un.</span>
+                        </div>
+                        <div style={styles.tagRow}>
+                          <span>Stock Global:</span>
+                          <strong style={{ color: "#38BDF8" }}>{getProductTotalStock(p)} un.</strong>
+                        </div>
+
+                        <div style={styles.stockByLocBox}>
+                          {locations.map(loc => (
+                            <div key={loc.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94A3B8", margin: "2px 0" }}>
+                              <span>{loc.name}:</span>
+                              <strong style={{ color: "#E2E8F0" }}>{p.stockByLocation?.[loc.id] || 0}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -1065,47 +1044,34 @@
                 <div style={styles.pageHeader}>
                   <div>
                     <div style={styles.eyebrow}>LOGÍSTICA MULTI-BODEGA</div>
-                    <h2 style={styles.pageTitle}>Distribución y Traspaso entre Almacenes</h2>
+                    <h2 style={styles.pageTitle}>Distribución de Stock por Almacén</h2>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {canManageInventory && (
-                      <>
-                        <button style={styles.amberBtn} onClick={() => setTransferModalOpen(true)}>
-                          <Icon name="arrow-left-right" size={14} /> Traspasar Mercadería
-                        </button>
-                        <button style={styles.primaryBtn} onClick={() => setProductModalState("new")}>
-                          <Icon name="plus" size={14} /> Nuevo Artículo
-                        </button>
-                      </>
-                    )}
-                  </div>
+                  {canManageInventory && (
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={styles.amberBtn} onClick={() => setTransferModalOpen(true)}>
+                        <Icon name="arrow-left-right" size={14} /> Traspasar entre Bodegas
+                      </button>
+                      <button style={styles.primaryBtn} onClick={() => setProductModalState("new")}>
+                        <Icon name="plus" size={14} /> Nuevo Artículo
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div style={styles.dashGrid}>
-                  {locations.map(loc => {
-                    const totalLocUnits = products.reduce((acc, p) => acc + (Number(p.stockByLocation?.[loc.id]) || 0), 0);
-                    return (
-                      <div key={loc.id} style={styles.panel}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <Icon name="warehouse" size={18} color="#FBBF24" />
-                            <h3 style={{ color: "#F1F5F9", margin: 0, fontSize: 16 }}>{loc.name}</h3>
-                          </div>
-                          <span style={styles.badgeGreen}>{totalLocUnits} un. totales</span>
-                        </div>
-                        {products.map(p => (
-                          <div key={p.id} style={styles.listRow}>
-                            <div>
-                              <span style={{ color: "#F1F5F9", fontWeight: 500 }}>{p.name}</span>
-                              <div style={{ fontSize: 10.5, color: "#64748B", fontFamily: "monospace" }}>{p.sku}</div>
-                            </div>
-                            <strong style={{ color: (p.stockByLocation?.[loc.id] || 0) === 0 ? "#F87171" : "#38BDF8" }}>
-                              {p.stockByLocation?.[loc.id] || 0} un.
-                            </strong>
-                          </div>
-                        ))}
+                  {locations.map(loc => (
+                    <div key={loc.id} style={styles.panel}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                        <Icon name="building-2" size={18} color="#34D399" />
+                        <h3 style={{ color: "#F1F5F9", margin: 0, fontSize: 16 }}>{loc.name}</h3>
                       </div>
-                    );
-                  })}
+                      {products.map(p => (
+                        <div key={p.id} style={styles.listRow}>
+                          <span style={{ color: "#CBD5E1" }}>{p.name}</span>
+                          <strong style={{ color: "#38BDF8" }}>{p.stockByLocation?.[loc.id] || 0} un.</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1114,7 +1080,7 @@
               <div>
                 <div style={styles.pageHeader}>
                   <div>
-                    <div style={styles.eyebrow}>PUNTO DE VENTA & MOSTRADOR</div>
+                    <div style={styles.eyebrow}>PUNTO DE VENTA & CAJA</div>
                     <h2 style={styles.pageTitle}>Registro de Ventas Comerciales</h2>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -1173,7 +1139,7 @@
                           <tr key={s.id} style={styles.tableRow}>
                             <td style={{ padding: 10, color: "#94A3B8" }}>{s.date}</td>
                             <td style={{ fontWeight: 600, color: "#F8FAFC" }}>{s.customerName}</td>
-                            <td style={{ color: "#CBD5E1" }}>{s.details || "Venta general"}</td>
+                            <td style={{ color: "#94A3B8" }}>{s.details || "Venta general"}</td>
                             <td><span style={styles.badgeGray}>{s.paymentMethod}</span></td>
                             <td style={{ color: "#34D399", fontWeight: 700 }}>{money(s.total)}</td>
                             <td style={{ textAlign: "right", paddingRight: 10 }}>
@@ -1222,14 +1188,14 @@
                 rolePermissions={rolePermissions}
                 setRolePermissions={(newPerms) => {
                   setRolePermissions(newPerms);
-                  registerAudit("Permisos Actualizados", "Se modificaron los accesos por rol");
-                  notify("Permisos de rol actualizados");
+                  registerAudit("Permisos Actualizados", "Se actualizaron los permisos de rol");
+                  notify("Permisos actualizados");
                 }}
                 auditLog={auditLog}
                 onAddUser={async (u) => {
                   setUsers(prev => [...prev, u]);
                   registerAudit("Usuario Creado", `${u.name} (${u.role})`);
-                  notify("Miembro del equipo creado");
+                  notify("Usuario agregado");
                   if (supabase) await supabase.from("usuarios").insert([u]);
                 }}
               />
@@ -1306,7 +1272,7 @@
       const handleSubmit = (e) => {
         e.preventDefault();
         if (fromLocId === toLocId) {
-          alert("La bodega de origen y destino deben ser distintas.");
+          alert("Selecciona una bodega de destino distinta a la de origen.");
           return;
         }
         onTransfer({ productId, fromLocId, toLocId, qty: Number(qty) });
@@ -1318,46 +1284,32 @@
             <h3 style={styles.modalTitle}>Traspasar Mercadería entre Bodegas 🚚</h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <label style={styles.inputLabel}>Producto a Traspasar</label>
+                <label style={styles.inputLabel}>Producto</label>
                 <select style={styles.glassInput} value={productId} onChange={e => setProductId(e.target.value)}>
-                  {products.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} (SKU: {p.sku})</option>
-                  ))}
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                 </select>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
-                  <label style={styles.inputLabel}>Desde Bodega Origen</label>
+                  <label style={styles.inputLabel}>Desde Origen</label>
                   <select style={styles.glassInput} value={fromLocId} onChange={e => setFromLocId(e.target.value)}>
                     {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={styles.inputLabel}>Hacia Bodega Destino</label>
+                  <label style={styles.inputLabel}>Hacia Destino</label>
                   <select style={styles.glassInput} value={toLocId} onChange={e => setToLocId(e.target.value)}>
                     {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label style={styles.inputLabel}>
-                  Cantidad a Mover (Disponible en origen: <strong style={{ color: "#34D399" }}>{availableInOrigin} un.</strong>)
-                </label>
-                <input
-                  style={styles.glassInput}
-                  type="number"
-                  min="1"
-                  max={Math.max(1, availableInOrigin)}
-                  value={qty}
-                  onChange={e => setQty(e.target.value)}
-                  required
-                />
+                <label style={styles.inputLabel}>Cantidad (Disponible en origen: {availableInOrigin} un.)</label>
+                <input style={styles.glassInput} type="number" min="1" max={Math.max(1, availableInOrigin)} value={qty} onChange={e => setQty(e.target.value)} required />
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
                 <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-                <button type="submit" style={styles.amberBtn} disabled={availableInOrigin <= 0}>
-                  Confirmar Traspaso
-                </button>
+                <button type="submit" style={styles.amberBtn} disabled={availableInOrigin <= 0}>Traspasar</button>
               </div>
             </form>
           </div>
@@ -1365,7 +1317,7 @@
       );
     }
 
-    // ============ MODAL DE PRODUCTO / INVENTARIO CON AUTO-SKU ============
+    // ============ MODAL DE PRODUCTO / INVENTARIO ============
     function ProductModal({ product, locations, onClose, onSave }) {
       const [name, setName] = useState(product?.name || "");
       const [category, setCategory] = useState(product?.category || PRODUCT_CATEGORIES[0]);
@@ -1393,8 +1345,7 @@
       const generateAutoSKU = () => {
         const catPart = (category || "ALM").slice(0, 3).toUpperCase();
         const namePart = (name || "PRD").replace(/[^a-zA-Z0-9]/g, "").slice(0, 3).toUpperCase() || "PRD";
-        const numPart = String(Date.now()).slice(-3);
-        setSku(`${catPart}-${namePart}-${numPart}`);
+        setSku(`${catPart}-${namePart}-${String(Date.now()).slice(-3)}`);
       };
 
       const handleSubmit = (e) => {
@@ -1437,7 +1388,7 @@
                   <label style={styles.inputLabel}>SKU / Código Referencia</label>
                   <div style={{ display: "flex", gap: 6 }}>
                     <input style={styles.glassInput} value={sku} onChange={e => setSku(e.target.value)} placeholder="Ej: ROP-POL-101" />
-                    <button type="button" style={styles.smallGlassBtn} onClick={generateAutoSKU} title="Generar SKU Inteligente">Auto</button>
+                    <button type="button" style={styles.smallGlassBtn} onClick={generateAutoSKU}>Auto</button>
                   </div>
                 </div>
                 <div>
@@ -1462,7 +1413,7 @@
               </div>
 
               <div style={{ background: "rgba(255, 255, 255, 0.02)", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255, 255, 255, 0.08)", marginTop: 4 }}>
-                <span style={{ fontSize: 11.5, color: "#FBBF24", fontWeight: 600, display: "block", marginBottom: 8 }}>
+                <span style={{ fontSize: 11.5, color: "#38BDF8", fontWeight: 600, display: "block", marginBottom: 8 }}>
                   Distribución de Existencias por Bodega:
                 </span>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -1734,10 +1685,10 @@
         <div>
           <div style={styles.pageHeader}>
             <div>
-              <div style={styles.eyebrow}>MOSTRADOR CENTRAL & CONTROL DE ALMACÉN</div>
+              <div style={styles.eyebrow}>RESUMEN INTEGRAL & CONTROL</div>
               <h2 style={styles.pageTitle}>Bienvenido, {currentUser.name} ✨</h2>
             </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 10 }}>
               {canAccessPersonal && (
                 <button style={styles.purpleBtn} onClick={onNewPersonal}>
                   <Icon name="plus" size={14} /> Movimiento Personal
@@ -1751,29 +1702,28 @@
             </div>
           </div>
 
-          {/* ALERTA RÁPIDA DE REPOSICIÓN DE ALMACÉN */}
           {lowStock.length > 0 && (
             <div style={styles.warehouseAlertBanner}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <Icon name="alert-triangle" size={18} color="#FBBF24" />
                 <div>
                   <strong style={{ color: "#FEF3C7", fontSize: 13 }}>
-                    Atención en Bodega: Tienes {lowStock.length} {lowStock.length === 1 ? "producto" : "productos"} con stock crítico
+                    Alerta de Estantería: {lowStock.length} {lowStock.length === 1 ? "producto requiere" : "productos requieren"} reposición
                   </strong>
                   <div style={{ fontSize: 11.5, color: "#FDE68A" }}>
-                    {lowStock.map(p => `${p.name} (${getProductTotalStock(p)}/${p.minStock} un.)`).join(" • ")}
+                    {lowStock.map(p => `${p.name} (${getProductTotalStock(p)} un.)`).join(" • ")}
                   </div>
                 </div>
               </div>
-              <button style={styles.amberBtn} onClick={onGoToInventory}>Ver Estantería</button>
+              <button style={styles.amberBtn} onClick={onGoToInventory}>Revisar Inventario</button>
             </div>
           )}
 
           {/* SECCIÓN 1: FINANZAS DEL NEGOCIO */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={styles.sectionHeader}>
-              <Icon name="store" size={17} color="#34D399" />
-              <span style={styles.sectionTitle}>Finanzas & Operación del Almacén</span>
+              <Icon name="briefcase" size={17} color="#34D399" />
+              <span style={styles.sectionTitle}>Finanzas & Operación del Negocio</span>
             </div>
             <button style={styles.sheetsExportBtn} onClick={onExportBusiness}>
               <Icon name="file-spreadsheet" size={14} color="#34D399" /> Exportar a Sheets
@@ -1856,7 +1806,7 @@
                   <div style={styles.miniProjectionCard}>
                     <span style={styles.miniLabel}>Costo Invertido (Stock)</span>
                     <strong style={{ color: "#F87171", fontSize: 15 }}>
-                      {money(inventoryProjection.cost ?? inventoryProjection.totalCost)}
+                      {money(inventoryProjection.cost || inventoryProjection.totalCost)}
                     </strong>
                     <span style={{ fontSize: 10, color: "#64748B" }}>Dinero retenido en costo</span>
                   </div>
@@ -1864,7 +1814,7 @@
                   <div style={styles.miniProjectionCard}>
                     <span style={styles.miniLabel}>Venta Bruta Estimada</span>
                     <strong style={{ color: "#38BDF8", fontSize: 15 }}>
-                      {money(inventoryProjection.revenue ?? inventoryProjection.totalRevenue)}
+                      {money(inventoryProjection.revenue || inventoryProjection.totalRevenue)}
                     </strong>
                     <span style={{ fontSize: 10, color: "#64748B" }}>Ingreso total al liquidar</span>
                   </div>
@@ -1872,7 +1822,7 @@
                   <div style={{ ...styles.miniProjectionCard, background: "rgba(52, 211, 153, 0.08)", borderColor: "rgba(52, 211, 153, 0.3)" }}>
                     <span style={{ ...styles.miniLabel, color: "#34D399" }}>Ganancia Neta Posible</span>
                     <strong style={{ color: "#34D399", fontSize: 17 }}>
-                      +{money(inventoryProjection.profit ?? inventoryProjection.totalProfit)}
+                      +{money(inventoryProjection.profit || inventoryProjection.totalProfit)}
                     </strong>
                     <span style={{ fontSize: 10, color: "#34D399" }}>Utilidad líquida a cobrar</span>
                   </div>
@@ -2212,4 +2162,1053 @@
                   expenses.map(e => (
                     <tr key={e.id} style={styles.tableRow}>
                       <td style={{ padding: 10, color: "#94A3B8" }}>{e.date}</td>
-                      <td><span
+                      <td><span style={styles.badgeGray}>{e.category}</span></td>
+                      <td style={{ color: "#94A3B8" }}>{e.description || "-"}</td>
+                      <td style={{ color: "#F87171", fontWeight: 700 }}>{money(e.amount)}</td>
+                      <td style={{ textAlign: "right", paddingRight: 10 }}>
+                        <button style={styles.actionIconBtn} onClick={() => onEdit(e)} title="Modificar">
+                          <Icon name="pencil" size={14} color="#38BDF8" />
+                        </button>
+                        <button style={styles.actionIconBtn} onClick={() => onDelete(e.id)} title="Eliminar">
+                          <Icon name="trash-2" size={14} color="#F87171" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ CLIENTES ============
+    function ClientesManager({ customers, sales, onNew, onEdit, onDelete }) {
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+
+      const customerStats = useMemo(() => {
+        return customers.map(c => {
+          const customerSales = sales.filter(s => (s.customerName || "").toLowerCase() === (c.name || "").toLowerCase());
+          const totalSpent = customerSales.reduce((a, s) => a + Number(s.total || 0), 0);
+          const lastPurchase = customerSales.length ? customerSales.map(s => s.date).sort().reverse()[0] : null;
+          return { ...c, purchaseCount: customerSales.length, totalSpent, lastPurchase };
+        }).sort((a, b) => b.totalSpent - a.totalSpent);
+      }, [customers, sales]);
+
+      useEffect(() => {
+        if (!window.Chart) return;
+        if (chartRef.current) chartRef.current.destroy();
+        if (canvasRef.current) {
+          const top = customerStats.slice(0, 6);
+          chartRef.current = new window.Chart(canvasRef.current, {
+            type: "bar",
+            data: {
+              labels: top.map(c => c.name),
+              datasets: [{
+                label: "Total comprado",
+                data: top.map(c => c.totalSpent),
+                backgroundColor: "rgba(52, 211, 153, 0.75)",
+                borderRadius: 6
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              indexAxis: "y",
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { color: "#64748B", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } },
+                y: { ticks: { color: "#E2E8F0", font: { size: 11 } }, grid: { display: false } }
+              }
+            }
+          });
+        }
+        return () => { if (chartRef.current) chartRef.current.destroy(); };
+      }, [customerStats]);
+
+      return (
+        <div>
+          <div style={styles.pageHeader}>
+            <div>
+              <div style={styles.eyebrow}>CRM & CARTERA</div>
+              <h2 style={styles.pageTitle}>Fichas de Clientes e Historial de Compra</h2>
+            </div>
+            <button style={styles.primaryBtn} onClick={onNew}>
+              <Icon name="user-plus" size={14} /> Agregar Cliente
+            </button>
+          </div>
+
+          <div style={styles.panel}>
+            <h3 style={styles.panelTitle}>Top Clientes por Monto Comprado</h3>
+            <div style={{ height: 210 }}>
+              <canvas ref={canvasRef}></canvas>
+            </div>
+          </div>
+
+          <div style={{ ...styles.panel, marginTop: 16 }}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.tableHeaderRow}>
+                  <th style={{ padding: "12px 10px" }}>Nombre</th>
+                  <th>Teléfono</th>
+                  <th>N° Compras</th>
+                  <th>Total Comprado</th>
+                  <th>Última Compra</th>
+                  <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerStats.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                      No hay clientes registrados todavía.
+                    </td>
+                  </tr>
+                ) : (
+                  customerStats.map(c => (
+                    <tr key={c.id} style={styles.tableRow}>
+                      <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{c.name}</td>
+                      <td style={{ color: "#94A3B8" }}>{c.phone || "-"}</td>
+                      <td><span style={styles.badgeGray}>{c.purchaseCount} ped.</span></td>
+                      <td style={{ color: "#34D399", fontWeight: 700 }}>{money(c.totalSpent)}</td>
+                      <td style={{ color: "#94A3B8" }}>{c.lastPurchase || "-"}</td>
+                      <td style={{ textAlign: "right", paddingRight: 10 }}>
+                        <button style={styles.actionIconBtn} onClick={() => onEdit(c)} title="Modificar">
+                          <Icon name="pencil" size={14} color="#38BDF8" />
+                        </button>
+                        <button style={styles.actionIconBtn} onClick={() => onDelete(c.id)} title="Eliminar">
+                          <Icon name="trash-2" size={14} color="#F87171" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ MODALES ============
+    function SaleModal({ sale, customers, products, locations, onClose, onSave }) {
+      const [customerName, setCustomerName] = useState(sale?.customerName || "");
+      const [details, setDetails] = useState(sale?.details || "");
+      const [paymentMethod, setPaymentMethod] = useState(sale?.paymentMethod || "Efectivo");
+      const [total, setTotal] = useState(sale?.total || 0);
+      const [date, setDate] = useState(sale?.date || new Date().toISOString().slice(0, 10));
+
+      const [selectedProductId, setSelectedProductId] = useState("");
+      const [selectedQty, setSelectedQty] = useState(1);
+      const [selectedLocId, setSelectedLocId] = useState(locations[1]?.id || "loc-tienda");
+
+      const handleQuickSelectProduct = (prodId, qtyVal) => {
+        setSelectedProductId(prodId);
+        const prod = products.find(p => p.id === prodId);
+        if (prod) {
+          const q = Math.max(1, Number(qtyVal) || 1);
+          setDetails(`${q}x ${prod.name}`);
+          setTotal((Number(prod.salePrice) || 0) * q);
+        }
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!customerName.trim() || Number(total) <= 0) return;
+        const deduction = !sale && selectedProductId
+          ? { productId: selectedProductId, qty: Number(selectedQty) || 1, locationId: selectedLocId }
+          : null;
+        onSave(
+          { customerName: sanitizeText(customerName), details: sanitizeText(details), paymentMethod, total: Number(total), date },
+          deduction
+        );
+      };
+
+      return (
+        <div style={styles.overlay} onClick={onClose}>
+          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>{sale ? "Modificar Venta" : "Registrar Nueva Venta"}</h3>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {!sale && products && products.length > 0 && (
+                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(251,191,36,0.25)", borderRadius: 10, padding: 10 }}>
+                  <span style={{ fontSize: 11, color: "#FBBF24", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                    ⚡ Seleccionar Producto del Almacén (Descuenta Stock Automáticamente):
+                  </span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 1fr", gap: 8 }}>
+                    <select style={styles.glassInput} value={selectedProductId} onChange={e => handleQuickSelectProduct(e.target.value, selectedQty)}>
+                      <option value="">-- Venta manual libre --</option>
+                      {products.map(p => <option key={p.id} value={p.id}>{p.name} ({money(p.salePrice)})</option>)}
+                    </select>
+                    <input
+                      style={styles.glassInput}
+                      type="number"
+                      min="1"
+                      value={selectedQty}
+                      onChange={e => {
+                        setSelectedQty(e.target.value);
+                        if (selectedProductId) handleQuickSelectProduct(selectedProductId, e.target.value);
+                      }}
+                    />
+                    <select style={styles.glassInput} value={selectedLocId} onChange={e => setSelectedLocId(e.target.value)}>
+                      {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label style={styles.inputLabel}>Cliente</label>
+                <input style={styles.glassInput} value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Ej: Carlos Soto / Consumidor Final" list="customer-suggestions" required />
+                <datalist id="customer-suggestions">
+                  {customers.map(c => <option key={c.id} value={c.name} />)}
+                </datalist>
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Detalle o Concepto</label>
+                <input style={styles.glassInput} value={details} onChange={e => setDetails(e.target.value)} placeholder="Ej: 2x Poleras Oversize" />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={styles.inputLabel}>Medio de Pago</label>
+                  <select style={styles.glassInput} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Tarjeta Débito">Tarjeta Débito</option>
+                    <option value="Tarjeta Crédito">Tarjeta Crédito</option>
+                    <option value="Transferencia">Transferencia</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={styles.inputLabel}>Total Venta ($)</label>
+                  <input style={styles.glassInput} type="number" min="1" value={total} onChange={e => setTotal(e.target.value)} required />
+                </div>
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Fecha</label>
+                <input style={styles.glassInput} type="date" value={date} onChange={e => setDate(e.target.value)} required />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+                <button type="submit" style={styles.primaryBtn}>{sale ? "Guardar Cambios" : "Guardar Venta"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function ExpenseModal({ expense, onClose, onSave }) {
+      const [category, setCategory] = useState(expense?.category || EXPENSE_CATEGORIES[0]);
+      const [description, setDescription] = useState(expense?.description || "");
+      const [amount, setAmount] = useState(expense?.amount || 0);
+      const [date, setDate] = useState(expense?.date || new Date().toISOString().slice(0, 10));
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (Number(amount) <= 0) return;
+        onSave({ category, description: sanitizeText(description), amount: Number(amount), date });
+      };
+
+      return (
+        <div style={styles.overlay} onClick={onClose}>
+          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>{expense ? "Modificar Gasto Negocio" : "Registrar Gasto de Negocio"}</h3>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={styles.inputLabel}>Categoría</label>
+                <select style={styles.glassInput} value={category} onChange={e => setCategory(e.target.value)}>
+                  {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Descripción</label>
+                <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej: Pago de luz o insumos" />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={styles.inputLabel}>Monto ($)</label>
+                  <input style={styles.glassInput} type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required />
+                </div>
+                <div>
+                  <label style={styles.inputLabel}>Fecha</label>
+                  <input style={styles.glassInput} type="date" value={date} onChange={e => setDate(e.target.value)} required />
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+                <button type="submit" style={styles.primaryBtn}>{expense ? "Guardar Cambios" : "Guardar Gasto"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function CustomerModal({ customer, onClose, onSave }) {
+      const [name, setName] = useState(customer?.name || "");
+      const [phone, setPhone] = useState(customer?.phone || "");
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        onSave({ name: sanitizeText(name), phone: sanitizeText(phone) });
+      };
+
+      return (
+        <div style={styles.overlay} onClick={onClose}>
+          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>{customer ? "Modificar Cliente" : "Agregar Nuevo Cliente"}</h3>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={styles.inputLabel}>Nombre</label>
+                <input style={styles.glassInput} value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Carlos Soto" required />
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Teléfono</label>
+                <input style={styles.glassInput} value={phone} onChange={e => setPhone(e.target.value)} placeholder="Ej: +56 9 1234 5678" />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+                <button type="submit" style={styles.primaryBtn}>{customer ? "Guardar Cambios" : "Guardar Cliente"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function PersonalFinanceModal({ item, onClose, onSave }) {
+      const [type, setType] = useState(item?.type || "gasto");
+      const [category, setCategory] = useState(item?.category || PERSONAL_CATEGORIES[0]);
+      const [description, setDescription] = useState(item?.description || "");
+      const [amount, setAmount] = useState(item?.amount || 0);
+      const [date, setDate] = useState(item?.date || new Date().toISOString().slice(0, 10));
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (Number(amount) <= 0) return;
+        onSave({ type, category, description: sanitizeText(description), amount: Number(amount), date });
+      };
+
+      return (
+        <div style={styles.overlay} onClick={onClose}>
+          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+            <h3 style={{ ...styles.modalTitle, color: "#E9D5FF" }}>
+              {item ? "Modificar Movimiento Personal" : "Nuevo Movimiento Personal 👤"}
+            </h3>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={styles.inputLabel}>Tipo de Movimiento</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    style={{ ...styles.typeTabBtn, ...(type === "ingreso" ? styles.typeTabActiveGreen : {}) }}
+                    onClick={() => setType("ingreso")}
+                  >
+                    + Ingreso / Retiro
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...styles.typeTabBtn, ...(type === "gasto" ? styles.typeTabActiveRed : {}) }}
+                    onClick={() => setType("gasto")}
+                  >
+                    - Gasto Personal
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label style={styles.inputLabel}>Categoría Personal</label>
+                <select style={styles.glassInput} value={category} onChange={e => setCategory(e.target.value)}>
+                  {PERSONAL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={styles.inputLabel}>Concepto o Descripción</label>
+                <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej: Compra supermercado, Cena, etc." />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={styles.inputLabel}>Monto ($)</label>
+                  <input style={styles.glassInput} type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required />
+                </div>
+                <div>
+                  <label style={styles.inputLabel}>Fecha</label>
+                  <input style={styles.glassInput} type="date" value={date} onChange={e => setDate(e.target.value)} required />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+                <button type="submit" style={styles.purpleBtn}>{item ? "Guardar Cambios" : "Guardar Personal"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ AUTENTICACIÓN ============
+    function AuthScreen({ onLogin, onRegister, users }) {
+      const [isRegister, setIsRegister] = useState(false);
+      const [email, setEmail] = useState("admin@negocio.cl");
+      const [pass, setPass] = useState("123");
+      const [name, setName] = useState("");
+      const [role, setRole] = useState("Vendedor");
+      const [adminAuthCode, setAdminAuthCode] = useState("");
+      const [error, setError] = useState("");
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError("");
+        const cleanEmail = email.trim().toLowerCase();
+
+        let locks = {};
+        try { locks = JSON.parse(localStorage.getItem(LOGIN_LOCKS_KEY) || "{}"); } catch (err) {}
+        const currentLock = locks[cleanEmail];
+        if (currentLock && currentLock.until > Date.now()) {
+          const waitSec = Math.ceil((currentLock.until - Date.now()) / 1000);
+          setError(`Demasiados intentos fallidos. Espera ${waitSec}s.`);
+          return;
+        }
+
+        if (isRegister) {
+          if (!name.trim() || !cleanEmail || !pass.trim()) {
+            setError("Todos los campos son obligatorios.");
+            return;
+          }
+          if (users.some(u => (u.email || "").toLowerCase() === cleanEmail)) {
+            setError("Ya existe un usuario con este correo.");
+            return;
+          }
+          if ((role === "Administrador" || role === "Personal") && adminAuthCode !== "123") {
+            setError("Ingresa la clave de autorización del propietario (123) para crear roles administrativos.");
+            return;
+          }
+          const hashedPass = await hashPassword(pass);
+          const newUser = { id: "u-" + Date.now(), name: sanitizeText(name), email: cleanEmail, pass: hashedPass, role };
+          onRegister(newUser);
+        } else {
+          const userFound = users.find(u => (u.email || "").toLowerCase() === cleanEmail);
+          const isValid = await verifyUserPassword(userFound, pass);
+          if (userFound && isValid) {
+            delete locks[cleanEmail];
+            try { localStorage.setItem(LOGIN_LOCKS_KEY, JSON.stringify(locks)); } catch (err) {}
+            onLogin(userFound);
+          } else {
+            const attempts = (currentLock?.attempts || 0) + 1;
+            locks[cleanEmail] = { attempts, until: attempts >= 5 ? Date.now() + 45000 : 0 };
+            try { localStorage.setItem(LOGIN_LOCKS_KEY, JSON.stringify(locks)); } catch (err) {}
+            setError(`Credenciales incorrectas (${attempts}/5 intentos).`);
+          }
+        }
+      };
+
+      const setDemo = (userEmail) => {
+        const u = users.find(x => x.email === userEmail);
+        if (u) {
+          setEmail(u.email);
+          setPass("123");
+          setError("");
+        }
+      };
+
+      return (
+        <div style={styles.authContainer}>
+          <div style={styles.authGlassCard}>
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <div style={styles.authLogo}>
+                <Icon name="boxes" size={24} color="#EDEAE1" />
+              </div>
+              <h2 style={{ color: "#F8FAFC", margin: "10px 0 4px", fontSize: 22, fontWeight: 700 }}>Almacén PRO</h2>
+              <p style={{ color: "#94A3B8", fontSize: 13 }}>Gestión Multi-Bodega & Finanzas Personales</p>
+            </div>
+
+            <div style={styles.authTabs}>
+              <button type="button" style={{ ...styles.authTabBtn, ...(isRegister ? {} : styles.authTabActive) }} onClick={() => { setIsRegister(false); setError(""); }}>Iniciar Sesión</button>
+              <button type="button" style={{ ...styles.authTabBtn, ...(isRegister ? styles.authTabActive : {}) }} onClick={() => { setIsRegister(true); setError(""); }}>Crear Cuenta</button>
+            </div>
+
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {isRegister && (
+                <div>
+                  <label style={styles.inputLabel}>Nombre completo</label>
+                  <input style={styles.glassInput} placeholder="Ej: Benjamín Parra" value={name} onChange={(e) => setName(e.target.value)} required />
+                </div>
+              )}
+              <div>
+                <label style={styles.inputLabel}>Correo electrónico</label>
+                <input style={styles.glassInput} type="email" placeholder="usuario@negocio.cl" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              </div>
+              <div>
+                <label style={styles.inputLabel}>Contraseña</label>
+                <input style={styles.glassInput} type="password" placeholder="••••••••" value={pass} onChange={(e) => setPass(e.target.value)} required />
+              </div>
+              {isRegister && (
+                <>
+                  <div>
+                    <label style={styles.inputLabel}>Rol / Tipo de Perfil</label>
+                    <select style={styles.glassInput} value={role} onChange={(e) => setRole(e.target.value)}>
+                      <option value="Vendedor">Vendedor (Punto de Venta y Clientes)</option>
+                      <option value="Bodeguero">Bodeguero (Inventario y Almacenes)</option>
+                      <option value="Personal">Personal (Finanzas Personales + Visión Global)</option>
+                      <option value="Administrador">Administrador (Acceso Total Negocio & Personal)</option>
+                    </select>
+                  </div>
+                  {(role === "Administrador" || role === "Personal") && (
+                    <div>
+                      <label style={{ ...styles.inputLabel, color: "#FBBF24" }}>Clave de Autorización del Propietario</label>
+                      <input style={styles.glassInput} type="password" placeholder="Clave de autorización" value={adminAuthCode} onChange={e => setAdminAuthCode(e.target.value)} required />
+                    </div>
+                  )}
+                </>
+              )}
+              {error && <div style={styles.errorMsg}>{error}</div>}
+              <button type="submit" style={styles.submitBtn}>
+                {isRegister ? "Registrar e Ingresar" : "Entrar al Sistema"}
+              </button>
+            </form>
+
+            {!isRegister && (
+              <div style={styles.demoSection}>
+                <span style={{ fontSize: 11, color: "#94A3B8" }}>Accesos rápidos de prueba:</span>
+                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("admin@negocio.cl")}>Admin</button>
+                  <button type="button" style={{ ...styles.quickDemoBtn, borderColor: "rgba(168,85,247,0.4)" }} onClick={() => setDemo("personal@negocio.cl")}>Personal ✨</button>
+                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("ventas@negocio.cl")}>Ventas</button>
+                  <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("bodega@negocio.cl")}>Bodega</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ============ GESTIÓN DE USUARIOS ============
+    function UsersManager({ users, onAddUser, rolePermissions, setRolePermissions, auditLog }) {
+      const [modal, setModal] = useState(false);
+      const [name, setName] = useState("");
+      const [email, setEmail] = useState("");
+      const [pass, setPass] = useState("");
+      const [role, setRole] = useState("Personal");
+
+      const handleCreate = async (e) => {
+        e.preventDefault();
+        if (!name || !email || !pass) return;
+        const hashedPass = await hashPassword(pass);
+        onAddUser({ id: "u-" + Date.now(), name: sanitizeText(name), email: sanitizeText(email).toLowerCase(), pass: hashedPass, role });
+        setName(""); setEmail(""); setPass(""); setModal(false);
+      };
+
+      const permissionRows = [
+        { key: "personal", label: "Ventana: Espacio Personal" },
+        { key: "inventario", label: "Ventana: Inventario & Catálogo" },
+        { key: "bodegas", label: "Ventana: Bodegas & Traspaso" },
+        { key: "ventas", label: "Ventana: Ventas & Caja" },
+        { key: "clientes", label: "Ventana: Clientes" },
+        { key: "gastos", label: "Ventana: Gastos Negocio" },
+        { key: "canManageInventory", label: "Permiso: Agregar / Editar Productos" },
+        { key: "canViewCosts", label: "Seguridad: Ver Costos y Proyección" },
+        { key: "canDeleteRecords", label: "Seguridad: Eliminar Ventas" }
+      ];
+
+      const togglePerm = (rName, permKey) => {
+        if (rName === "Administrador") return;
+        setRolePermissions({
+          ...rolePermissions,
+          [rName]: {
+            ...(rolePermissions[rName] || {}),
+            [permKey]: !rolePermissions[rName]?.[permKey]
+          }
+        });
+      };
+
+      return (
+        <div>
+          <div style={styles.pageHeader}>
+            <div>
+              <div style={styles.eyebrow}>CONTROL DE ACCESO & SEGURIDAD</div>
+              <h2 style={styles.pageTitle}>Cuentas, Permisos por Ventana y Bitácora</h2>
+            </div>
+            <button style={styles.primaryBtn} onClick={() => setModal(true)}>+ Agregar Miembro</button>
+          </div>
+
+          <div style={styles.panel}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.tableHeaderRow}>
+                  <th style={{ padding: "12px 10px" }}>Nombre</th>
+                  <th>Correo</th>
+                  <th>Rol asignado</th>
+                  <th>Cifrado</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.id} style={styles.tableRow}>
+                    <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{u.name}</td>
+                    <td style={{ color: "#94A3B8" }}>{u.email}</td>
+                    <td>
+                      <span style={u.role === "Personal" ? styles.badgePurple : styles.badgeGreenTag}>
+                        {u.role}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={styles.badgeGray}>
+                        {String(u.pass || "").startsWith("sha256$") ? "🔒 SHA-256" : "⚡ Activo"}
+                      </span>
+                    </td>
+                    <td><span style={{ color: "#34D399", fontSize: 12 }}>● Activo</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ ...styles.panel, marginTop: 16 }}>
+            <h3 style={{ ...styles.panelTitle, marginBottom: 10 }}>Matriz de Permisos Configurable por Rol</h3>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.tableHeaderRow}>
+                  <th style={{ padding: 8 }}>Módulo / Permiso</th>
+                  <th>Administrador</th>
+                  <th>Personal</th>
+                  <th>Bodeguero</th>
+                  <th>Vendedor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {permissionRows.map(pr => (
+                  <tr key={pr.key} style={styles.tableRow}>
+                    <td style={{ padding: 8 }}>{pr.label}</td>
+                    {["Administrador", "Personal", "Bodeguero", "Vendedor"].map(rName => (
+                      <td key={rName}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(rolePermissions[rName]?.[pr.key])}
+                          disabled={rName === "Administrador"}
+                          onChange={() => togglePerm(rName, pr.key)}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ ...styles.panel, marginTop: 16 }}>
+            <h3 style={{ ...styles.panelTitle, marginBottom: 10 }}>Bitácora de Auditoría</h3>
+            <div style={{ maxHeight: 200, overflowY: "auto" }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeaderRow}>
+                    <th style={{ padding: 8 }}>Fecha</th>
+                    <th>Usuario</th>
+                    <th>Evento</th>
+                    <th>Detalle</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLog.length === 0 ? (
+                    <tr><td colSpan="4" style={{ padding: 14, textAlign: "center", color: "#64748B" }}>Sin registros aún.</td></tr>
+                  ) : (
+                    auditLog.slice(0, 25).map(a => (
+                      <tr key={a.id} style={styles.tableRow}>
+                        <td style={{ padding: 8, color: "#94A3B8", fontSize: 11.5 }}>{a.date}</td>
+                        <td style={{ fontWeight: 600 }}>{a.actor}</td>
+                        <td><span style={styles.badgeGray}>{a.action}</span></td>
+                        <td style={{ color: "#CBD5E1" }}>{a.detail}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {modal && (
+            <div style={styles.overlay} onClick={() => setModal(false)}>
+              <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+                <h3 style={styles.modalTitle}>Crear Cuenta de Usuario</h3>
+                <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <label style={styles.inputLabel}>Nombre</label>
+                    <input style={styles.glassInput} value={name} onChange={e => setName(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label style={styles.inputLabel}>Correo</label>
+                    <input style={styles.glassInput} type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label style={styles.inputLabel}>Contraseña provisional</label>
+                    <input style={styles.glassInput} type="password" value={pass} onChange={e => setPass(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label style={styles.inputLabel}>Rol de acceso</label>
+                    <select style={styles.glassInput} value={role} onChange={e => setRole(e.target.value)}>
+                      <option value="Personal">Personal (Finanzas Personales + Panel)</option>
+                      <option value="Administrador">Administrador (Acceso total)</option>
+                      <option value="Bodeguero">Bodeguero</option>
+                      <option value="Vendedor">Vendedor</option>
+                    </select>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                    <button type="button" style={styles.secondaryBtn} onClick={() => setModal(false)}>Cancelar</button>
+                    <button type="submit" style={styles.primaryBtn}>Crear Usuario</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ============ ESTILOS ============
+    const styles = {
+      appContainer: {
+        display: "flex",
+        minHeight: "92vh",
+        background: "rgba(15, 23, 42, 0.65)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        borderRadius: 20,
+        overflow: "hidden",
+        border: "1px solid rgba(255, 255, 255, 0.1)",
+        boxShadow: "0 20px 50px rgba(0, 0, 0, 0.5)"
+      },
+      sidebar: {
+        width: 240,
+        background: "rgba(10, 15, 26, 0.7)",
+        backdropFilter: "blur(25px)",
+        WebkitBackdropFilter: "blur(25px)",
+        padding: "20px 16px",
+        display: "flex",
+        flexDirection: "column",
+        borderRight: "1px solid rgba(255, 255, 255, 0.08)"
+      },
+      brand: {
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        paddingBottom: 16,
+        borderBottom: "1px solid rgba(255, 255, 255, 0.08)"
+      },
+      brandTitle: { fontWeight: 700, fontSize: 15, color: "#F8FAFC", letterSpacing: "-0.02em" },
+      brandSub: { color: "#94A3B8", fontSize: 10.5 },
+      themeToggleBtn: {
+        background: "rgba(255, 255, 255, 0.06)",
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+        borderRadius: 8,
+        padding: 6,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center"
+      },
+      userCard: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        background: "rgba(255, 255, 255, 0.04)",
+        padding: "10px 12px",
+        borderRadius: 12,
+        margin: "16px 0 12px",
+        border: "1px solid rgba(255, 255, 255, 0.08)",
+        backdropFilter: "blur(10px)"
+      },
+      userAvatar: {
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        background: "linear-gradient(135deg, #0c4f1c, #047857)",
+        color: "#F8FAFC",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 11,
+        fontWeight: 700
+      },
+      userName: { fontSize: 12.5, fontWeight: 600, color: "#F8FAFC", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+      roleBadge: { fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, display: "block" },
+      logoutBtn: { background: "transparent", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" },
+
+      nav: { display: "flex", flexDirection: "column", gap: 5, flex: 1, marginTop: 4 },
+      navItem: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 12px",
+        borderRadius: 10,
+        background: "transparent",
+        border: "none",
+        color: "#94A3B8",
+        fontSize: 13,
+        cursor: "pointer",
+        textAlign: "left",
+        transition: "all 0.2s ease"
+      },
+      navItemActive: {
+        background: "rgba(255, 255, 255, 0.08)",
+        color: "#F8FAFC",
+        fontWeight: 600,
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
+      },
+      navBadge: { marginLeft: "auto", background: "rgba(239, 68, 68, 0.8)", color: "#FFF", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 10 },
+      navBadgePurple: { marginLeft: "auto", background: "rgba(168, 85, 247, 0.3)", color: "#E9D5FF", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, border: "1px solid rgba(168, 85, 247, 0.4)" },
+
+      footerStatus: { color: "#64748B", fontSize: 11, padding: "12px 4px 0", borderTop: "1px solid rgba(255, 255, 255, 0.06)", display: "flex", alignItems: "center", gap: 7 },
+      statusDot: { width: 7, height: 7, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 8px #34D399" },
+
+      main: { flex: 1, padding: "28px 34px", overflowY: "auto" },
+      pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 12 },
+      eyebrow: { color: "#34D399", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em" },
+      pageTitle: { margin: "3px 0 0", fontSize: 22, fontWeight: 700, color: "#F8FAFC" },
+
+      warehouseAlertBanner: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+        background: "rgba(180, 83, 9, 0.22)",
+        border: "1px solid rgba(251, 191, 36, 0.4)",
+        borderRadius: 12,
+        padding: "12px 16px",
+        marginBottom: 18,
+        flexWrap: "wrap"
+      },
+
+      sectionHeader: { display: "flex", alignItems: "center", gap: 9, borderLeft: "3px solid #34D399", paddingLeft: 10 },
+      sectionTitle: { fontSize: 14.5, fontWeight: 700, color: "#F1F5F9" },
+      linkGlassBtn: { background: "none", border: "none", color: "#C084FC", fontSize: 12, cursor: "pointer", fontWeight: 600 },
+
+      filterSelect: {
+        background: "rgba(255, 255, 255, 0.05)",
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+        borderRadius: 8,
+        padding: "7px 12px",
+        color: "#F8FAFC",
+        fontSize: 12.5,
+        outline: "none",
+        cursor: "pointer",
+        backdropFilter: "blur(10px)"
+      },
+      filterBanner: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        background: "rgba(56, 189, 248, 0.08)",
+        border: "1px solid rgba(56, 189, 248, 0.25)",
+        borderRadius: 8,
+        padding: "8px 14px",
+        marginBottom: 16,
+        fontSize: 12.5,
+        color: "#BAE6FD"
+      },
+      clearFilterBtn: {
+        background: "none",
+        border: "none",
+        color: "#38BDF8",
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: 600,
+        textDecoration: "underline",
+        marginLeft: "auto"
+      },
+
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 },
+      kpiCard: {
+        background: "rgba(255, 255, 255, 0.03)",
+        border: "1px solid rgba(255, 255, 255, 0.08)",
+        borderRadius: 14,
+        padding: "16px 18px",
+        backdropFilter: "blur(12px)",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.15)"
+      },
+      kpiLabel: { color: "#94A3B8", fontSize: 12, fontWeight: 500 },
+      kpiValue: { fontSize: 21, fontWeight: 700, marginTop: 6, letterSpacing: "-0.02em" },
+      kpiSub: { fontSize: 11, color: "#64748B", marginTop: 4, display: "block" },
+
+      miniProjectionCard: {
+        background: "rgba(255, 255, 255, 0.03)",
+        border: "1px solid rgba(255, 255, 255, 0.08)",
+        borderRadius: 10,
+        padding: "10px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2
+      },
+      miniLabel: { fontSize: 11, color: "#94A3B8", fontWeight: 500 },
+
+      dashGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 },
+      panel: {
+        background: "rgba(255, 255, 255, 0.03)",
+        border: "1px solid rgba(255, 255, 255, 0.08)",
+        borderRadius: 14,
+        padding: "18px 20px",
+        backdropFilter: "blur(14px)",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.15)"
+      },
+      panelTitleRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
+      panelTitle: { margin: 0, fontSize: 14, color: "#F1F5F9", fontWeight: 600 },
+      badgeGlass: { background: "rgba(255,255,255,0.06)", color: "#94A3B8", fontSize: 10, padding: "2px 8px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.08)" },
+
+      listRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(255, 255, 255, 0.05)", fontSize: 13 },
+      glassNote: { display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", background: "rgba(255, 255, 255, 0.02)", borderRadius: 10, border: "1px solid rgba(255, 255, 255, 0.06)" },
+
+      tagGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 },
+      productGlassCard: {
+        background: "rgba(255, 255, 255, 0.04)",
+        border: "1px solid rgba(251, 191, 36, 0.18)",
+        borderRadius: 14,
+        padding: 16,
+        backdropFilter: "blur(14px)"
+      },
+      categoryBadge: { fontSize: 10, color: "#38BDF8", fontWeight: 700, textTransform: "uppercase", background: "rgba(56, 189, 248, 0.1)", padding: "2px 6px", borderRadius: 4 },
+      stockLowBadge: { background: "rgba(239, 68, 68, 0.2)", color: "#FCA5A5", fontSize: 10, padding: "2px 6px", borderRadius: 4, fontWeight: 700 },
+      cardDivider: { borderTop: "1px dashed rgba(255, 255, 255, 0.1)", margin: "10px 0" },
+      tagRow: { display: "flex", justifyContent: "space-between", fontSize: 12, margin: "4px 0", color: "#CBD5E1" },
+      stockByLocBox: { marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(255, 255, 255, 0.05)" },
+
+      table: { width: "100%", borderCollapse: "collapse", color: "#F1F5F9", fontSize: 13 },
+      tableHeaderRow: { color: "#64748B", textAlign: "left", borderBottom: "1px solid rgba(255, 255, 255, 0.08)" },
+      tableRow: { borderBottom: "1px solid rgba(255, 255, 255, 0.05)" },
+
+      primaryBtn: {
+        background: "linear-gradient(135deg, #0c4f1c 0%, #15803d 100%)",
+        color: "#F8FAFC",
+        border: "1px solid rgba(255, 255, 255, 0.2)",
+        borderRadius: 8,
+        padding: "8px 14px",
+        fontWeight: 600,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 7,
+        fontSize: 12.5,
+        boxShadow: "0 4px 15px rgba(12, 79, 28, 0.4)"
+      },
+      amberBtn: {
+        background: "linear-gradient(135deg, #b45309 0%, #d97706 100%)",
+        color: "#FEF3C7",
+        border: "1px solid rgba(251, 191, 36, 0.35)",
+        borderRadius: 8,
+        padding: "8px 14px",
+        fontWeight: 600,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 7,
+        fontSize: 12.5
+      },
+      purpleBtn: {
+        background: "linear-gradient(135deg, #7E22CE 0%, #A855F7 100%)",
+        color: "#F8FAFC",
+        border: "1px solid rgba(255, 255, 255, 0.25)",
+        borderRadius: 8,
+        padding: "8px 14px",
+        fontWeight: 600,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 7,
+        fontSize: 12.5,
+        boxShadow: "0 4px 15px rgba(168, 85, 247, 0.35)"
+      },
+      sheetsExportBtn: {
+        background: "rgba(16, 185, 129, 0.12)",
+        color: "#34D399",
+        border: "1px solid rgba(52, 211, 153, 0.3)",
+        borderRadius: 8,
+        padding: "7px 12px",
+        fontWeight: 600,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
+        transition: "all 0.2s"
+      },
+      purpleExportBtn: {
+        background: "rgba(168, 85, 247, 0.12)",
+        color: "#C084FC",
+        border: "1px solid rgba(168, 85, 247, 0.3)",
+        borderRadius: 8,
+        padding: "7px 12px",
+        fontWeight: 600,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
+        transition: "all 0.2s"
+      },
+      secondaryBtn: { background: "rgba(255, 255, 255, 0.06)", color: "#E2E8F0", border: "1px solid rgba(255, 255, 255, 0.12)", borderRadius: 8, padding: "9px 15px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
+      smallGlassBtn: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer" },
+      actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "4px 5px", display: "inline-flex", alignItems: "center" },
+
+      badgeGray: { background: "rgba(255, 255, 255, 0.06)", color: "#94A3B8", padding: "3px 8px", borderRadius: 6, fontSize: 11 },
+      badgeGreen: { background: "rgba(16, 185, 129, 0.15)", color: "#34D399", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
+      badgeRed: { background: "rgba(239, 68, 68, 0.15)", color: "#F87171", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
+      badgePurple: { background: "rgba(168, 85, 247, 0.2)", color: "#D8B4FE", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
+      badgeGreenTag: { background: "rgba(12, 79, 28, 0.4)", color: "#6EE7B7", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, border: "1px solid rgba(52, 211, 153, 0.3)" },
+
+      overlay: { position: "fixed", inset: 0, background: "rgba(5, 8, 15, 0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 },
+      glassModal: {
+        background: "rgba(18, 24, 38, 0.85)",
+        border: "1px solid rgba(255, 255, 255, 0.15)",
+        borderRadius: 16,
+        padding: 24,
+        width: "100%",
+        maxWidth: 520,
+        boxShadow: "0 25px 60px rgba(0, 0, 0, 0.6)",
+        backdropFilter: "blur(25px)"
+      },
+      modalTitle: { margin: "0 0 16px", color: "#F8FAFC", fontSize: 17, fontWeight: 700 },
+      inputLabel: { display: "block", color: "#94A3B8", fontSize: 11.5, marginBottom: 5, fontWeight: 500 },
+      glassInput: {
+        background: "rgba(255, 255, 255, 0.05)",
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+        borderRadius: 8,
+        padding: "9px 12px",
+        color: "#F8FAFC",
+        fontSize: 13,
+        width: "100%",
+        outline: "none"
+      },
+
+      typeTabBtn: { flex: 1, padding: "8px 0", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "#94A3B8", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 },
+      typeTabActiveGreen: { background: "rgba(16, 185, 129, 0.2)", color: "#34D399", borderColor: "rgba(52, 211, 153, 0.4)" },
+      typeTabActiveRed: { background: "rgba(239, 68, 68, 0.2)", color: "#F87171", borderColor: "rgba(248, 113, 113, 0.4)" },
+
+      authContainer: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "85vh" },
+      authGlassCard: {
+        background: "rgba(15, 23, 42, 0.75)",
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+        borderRadius: 20,
+        padding: "32px 34px",
+        width: "100%",
+        maxWidth: 420,
+        boxShadow: "0 25px 60px rgba(0, 0, 0, 0.5)",
+        backdropFilter: "blur(25px)"
+      },
+      authLogo: { width: 48, height: 48, borderRadius: 12, background: "linear-gradient(135deg, #0c4f1c, #15803d)", color: "#EDEAE1", display: "inline-flex", alignItems: "center", justifyContent: "center" },
+      authTabs: { display: "flex", background: "rgba(255, 255, 255, 0.04)", padding: 4, borderRadius: 10, marginBottom: 18, border: "1px solid rgba(255, 255, 255, 0.08)" },
+      authTabBtn: { flex: 1, padding: "8px 0", background: "none", border: "none", color: "#94A3B8", fontSize: 12.5, fontWeight: 600, cursor: "pointer", borderRadius: 6 },
+      authTabActive: { background: "rgba(255, 255, 255, 0.1)", color: "#F8FAFC", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" },
+      submitBtn: { background: "linear-gradient(135deg, #0c4f1c, #15803d)", color: "#F8FAFC", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: 8, padding: "11px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 6 },
+      errorMsg: { background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#FCA5A5", padding: "8px 10px", borderRadius: 8, fontSize: 12 },
+      demoSection: { marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(255, 255, 255, 0.08)", textAlign: "center" },
+      quickDemoBtn: { background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.1)", color: "#CBD5E1", padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer" }
+    };
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
