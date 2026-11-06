@@ -2,9 +2,15 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#07090e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Almacén PRO" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <!-- Favicon / Logo de la pestaña -->
   <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="apple-touch-icon" href="logo.png" />
   <title>Almacén PRO - Control Comercial & Espacio Personal</title>
   <!-- Supabase Client CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -21,11 +27,17 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html {
+      -webkit-text-size-adjust: 100%;
+      scroll-behavior: smooth;
     }
     body {
       margin: 0;
       background: #07090e;
       min-height: 100vh;
+      min-height: 100dvh;
       display: flex;
       justify-content: center;
       align-items: center;
@@ -77,6 +89,59 @@
     ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
     ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
     ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
+
+    /* Contenedor deslizable horizontal para tablas en móvil */
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .table-scroll table {
+      min-width: 560px;
+    }
+
+    /* Adaptación responsiva integral para Android e iOS */
+    @media (max-width: 860px) {
+      body {
+        padding: 0;
+        align-items: stretch;
+      }
+      #root {
+        max-width: 100%;
+      }
+      /* Previene el auto-zoom forzado de Safari en iOS cuando font-size < 16px */
+      input, select, textarea {
+        font-size: 16px !important;
+      }
+      .mobile-top-bar {
+        padding-top: calc(10px + env(safe-area-inset-top, 0px)) !important;
+      }
+      .mobile-bottom-nav {
+        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+      }
+      .mobile-bottom-nav::-webkit-scrollbar {
+        display: none;
+      }
+      .responsive-2col, .responsive-3col {
+        grid-template-columns: 1fr !important;
+      }
+      .responsive-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+      }
+      .responsive-modal {
+        max-height: 90dvh !important;
+        overflow-y: auto !important;
+        margin: 10px !important;
+        padding: 18px 16px !important;
+        border-radius: 18px !important;
+      }
+    }
+    @media (max-width: 420px) {
+      .responsive-kpi-grid {
+        grid-template-columns: 1fr !important;
+      }
+    }
   </style>
 </head>
 <body data-warehouse-theme="warm">
@@ -181,10 +246,42 @@
       { id: "c2", name: "Consumidor Final", phone: "" }
     ];
 
+    const PERSONAL_WALLETS_KEY = "negocio_personal_wallets_v2";
+
+    const getStoredWalletMap = () => {
+      try {
+        return JSON.parse(localStorage.getItem(PERSONAL_WALLETS_KEY) || "{}");
+      } catch (e) {
+        return {};
+      }
+    };
+
+    const saveWalletInMap = (id, wallet) => {
+      try {
+        const current = getStoredWalletMap();
+        current[id] = wallet;
+        localStorage.setItem(PERSONAL_WALLETS_KEY, JSON.stringify(current));
+      } catch (e) {}
+    };
+
+    const getPersonalWallet = (item) => {
+      if (!item) return "Tarjeta";
+      if (item.wallet === "Efectivo" || item.wallet === "Tarjeta") return item.wallet;
+      if (item.paymentMethod === "Efectivo") return "Efectivo";
+      const map = getStoredWalletMap();
+      if (item.id && map[item.id]) return map[item.id];
+      const desc = String(item.description || "");
+      if (desc.startsWith("[Efectivo]")) return "Efectivo";
+      if (desc.startsWith("[Tarjeta]")) return "Tarjeta";
+      if (item.id === "pf-2") return "Efectivo";
+      return "Tarjeta";
+    };
+
     const initialPersonalFinances = [
-      { id: "pf-1", date: new Date().toISOString().slice(0, 10), type: "ingreso", category: "Retiro de Ganancias", description: "Sueldo / Retiro del Negocio", amount: 450000 },
-      { id: "pf-2", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Alimentación", description: "Supermercado quincena", amount: 65000 },
-      { id: "pf-3", date: new Date().toISOString().slice(0, 10), type: "gasto", category: "Servicios Personales", description: "Plan de Telefonía y Streaming", amount: 22990 }
+      { id: "pf-1", date: new Date().toISOString().slice(0, 10), type: "ingreso", wallet: "Tarjeta", category: "Retiro de Ganancias", description: "Sueldo / Retiro del Negocio", amount: 450000 },
+      { id: "pf-2", date: new Date().toISOString().slice(0, 10), type: "gasto", wallet: "Efectivo", category: "Alimentación", description: "Feria y compras en efectivo", amount: 45000 },
+      { id: "pf-3", date: new Date().toISOString().slice(0, 10), type: "gasto", wallet: "Tarjeta", category: "Servicios Personales", description: "Plan de Telefonía y Streaming", amount: 22990 },
+      { id: "pf-4", date: new Date().toISOString().slice(0, 10), type: "ingreso", wallet: "Efectivo", category: "Otros Ingresos", description: "Efectivo disponible en billetera", amount: 120000 }
     ];
 
     const defaultRolePermissions = {
@@ -303,6 +400,13 @@
       const [inventorySearch, setInventorySearch] = useState("");
       const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState("Todas");
       const [toast, setToast] = useState(null);
+      const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth <= 860 : false);
+
+      useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth <= 860);
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+      }, []);
 
       // Modales
       const [productModalState, setProductModalState] = useState(null);
@@ -647,19 +751,26 @@
 
       const handleSavePersonalFinance = async (itemData) => {
         let updatedEntry;
-        if (personalModalState === "new") {
+        const isCreating = personalModalState === "new" || Boolean(personalModalState?.isPreset);
+        if (isCreating) {
           updatedEntry = { ...itemData, id: "pf-" + Date.now() };
+          saveWalletInMap(updatedEntry.id, updatedEntry.wallet || "Tarjeta");
           setPersonalFinances(prev => [updatedEntry, ...prev]);
-          notify("Movimiento personal guardado");
+          notify(`Movimiento en ${updatedEntry.wallet || "Tarjeta"} guardado`);
         } else {
           updatedEntry = { ...itemData, id: personalModalState.id };
+          saveWalletInMap(updatedEntry.id, updatedEntry.wallet || "Tarjeta");
           setPersonalFinances(prev => prev.map(item => item.id === personalModalState.id ? updatedEntry : item));
           notify("Movimiento personal actualizado");
         }
         setPersonalModalState(null);
 
         if (supabase) {
-          await supabase.from("finanzas_personales").upsert([updatedEntry]);
+          const { error } = await supabase.from("finanzas_personales").upsert([updatedEntry]);
+          if (error) {
+            const { wallet, ...fallbackEntry } = updatedEntry;
+            await supabase.from("finanzas_personales").upsert([fallbackEntry]);
+          }
         }
       };
 
@@ -698,6 +809,14 @@
       const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
       const personalBalance = personalIncome - personalExpense;
 
+      const personalCashIncome = personalFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const personalCashExpense = personalFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const personalCashBalance = personalCashIncome - personalCashExpense;
+
+      const personalCardIncome = personalFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const personalCardExpense = personalFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const personalCardBalance = personalCardIncome - personalCardExpense;
+
       const handleExportBusinessFinances = () => {
         const today = new Date().toISOString().slice(0, 10);
         const labelPeriodo = salesMonthFilter ? formatMonthLabel(salesMonthFilter) : "Historial Completo";
@@ -724,27 +843,30 @@
         exportToGoogleSheetsCSV(`Finanzas_Negocio_${salesMonthFilter || "Total"}_${today}.csv`, rows);
       };
 
-      const handleExportPersonalFinances = (filteredList, periodLabel, pIncome, pExpense, pBalance) => {
+      const handleExportPersonalFinances = (filteredList, periodLabel, pIncome, pExpense, pBalance, pCashBalance = personalCashBalance, pCardBalance = personalCardBalance) => {
         const today = new Date().toISOString().slice(0, 10);
         const rows = [
-          ["REPORTE GENERAL - ESPACIO Y FINANZAS PERSONALES", "", "", "", ""],
-          ["Fecha de Exportación:", today, "", "", ""],
-          ["Período:", periodLabel, "", "", ""],
+          ["REPORTE GENERAL - ESPACIO Y FINANZAS PERSONALES", "", "", "", "", ""],
+          ["Fecha de Exportación:", today, "", "", "", ""],
+          ["Período:", periodLabel, "", "", "", ""],
           [""],
-          ["--- REGISTRO DE MOVIMIENTOS PERSONALES ---", "", "", "", ""],
-          ["Fecha", "Tipo", "Categoría", "Descripción / Motivo", "Monto ($)"],
+          ["--- REGISTRO DE MOVIMIENTOS PERSONALES ---", "", "", "", "", ""],
+          ["Fecha", "Tipo", "Medio (Efectivo/Tarjeta)", "Categoría", "Descripción / Motivo", "Monto ($)"],
           ...filteredList.map(p => [
             p.date,
             p.type === "ingreso" ? "Ingreso (+)" : "Gasto (-)",
+            getPersonalWallet(p),
             p.category,
             p.description || "-",
             p.type === "ingreso" ? p.amount : -Math.abs(p.amount)
           ]),
           [""],
-          ["--- BALANCE PERSONAL DEL PERÍODO ---", "", "", "", ""],
-          ["Total Ingresos Personales", "", "", "", pIncome],
-          ["Total Gastos Personales", "", "", "", pExpense],
-          ["SALDO DISPONIBLE EN BOLSILLO", "", "", "", pBalance]
+          ["--- BALANCE PERSONAL DEL PERÍODO ---", "", "", "", "", ""],
+          ["Total Ingresos Personales", "", "", "", "", pIncome],
+          ["Total Gastos Personales", "", "", "", "", pExpense],
+          ["Saldo en Efectivo", "", "", "", "", pCashBalance],
+          ["Saldo en Tarjeta / Banco", "", "", "", "", pCardBalance],
+          ["SALDO TOTAL DISPONIBLE", "", "", "", "", pBalance]
         ];
         exportToGoogleSheetsCSV(`Finanzas_Personales_${periodLabel.replace(/\s+/g, '_')}_${today}.csv`, rows);
       };
@@ -769,11 +891,22 @@
         exportToGoogleSheetsCSV(`Inventario_${today}.csv`, rows);
       };
 
+      const navItemsList = [
+        { id: "dashboard", label: "Panel General", shortLabel: "Panel", icon: "layout-dashboard", show: true },
+        { id: "personal", label: "Espacio Personal", shortLabel: "Personal", icon: "wallet", iconColor: "#C084FC", badgePurple: "Mío", show: canAccessPersonal },
+        { id: "inventario", label: "Inventario", shortLabel: "Inventario", icon: "package", badge: lowStock.length > 0 ? lowStock.length : null, show: true },
+        { id: "bodegas", label: "Bodegas & Traspaso", shortLabel: "Bodegas", icon: "warehouse", show: canAccessWarehouses },
+        { id: "ventas", label: "Ventas & Caja", shortLabel: "Ventas", icon: "shopping-cart", show: canAccessSales },
+        { id: "clientes", label: "Clientes", shortLabel: "Clientes", icon: "users-round", show: canAccessCustomers },
+        { id: "gastos", label: "Gastos Negocio", shortLabel: "Gastos", icon: "receipt", show: canAccessFinances },
+        { id: "usuarios", label: "Equipo & Roles", shortLabel: "Equipo", icon: "shield-check", show: role === "Administrador" }
+      ].filter(x => x.show);
+
       return (
-        <div style={styles.appContainer}>
+        <div style={{ ...styles.appContainer, ...(isMobile ? styles.appContainerMobile : {}) }}>
           {toast && (
             <div style={{
-              position: "fixed", bottom: 22, right: 24, zIndex: 999,
+              position: "fixed", bottom: isMobile ? 84 : 22, right: isMobile ? 14 : 24, left: isMobile ? 14 : "auto", zIndex: 999,
               background: toast.type === "warn" ? "rgba(217, 119, 6, 0.95)" : "rgba(12, 79, 28, 0.95)",
               border: "1px solid rgba(255,255,255,0.25)", color: "#FFF", padding: "10px 16px",
               borderRadius: 12, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8,
@@ -784,114 +917,109 @@
             </div>
           )}
 
-          <aside style={styles.sidebar}>
-            <div style={styles.brand}>
-              <img
-                src="logo.png"
-                alt="Logo Almacén"
-                onError={(e) => { e.target.style.display = "none"; }}
-                style={{ width: 36, height: 36, objectFit: "contain" }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={styles.brandTitle}>Almacén</div>
-                <div style={styles.brandSub}>
-                  {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
+          {isMobile ? (
+            <header className="mobile-top-bar" style={styles.mobileTopBar}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <img
+                  src="logo.png"
+                  alt="Logo Almacén"
+                  onError={(e) => { e.target.style.display = "none"; }}
+                  style={{ width: 30, height: 30, objectFit: "contain" }}
+                />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#F8FAFC", lineHeight: 1.1 }}>Almacén PRO</div>
+                  <div style={{ fontSize: 10, color: role === "Personal" ? "#C084FC" : "#34D399", fontWeight: 600 }}>
+                    {currentUser.name} • {currentUser.role}
+                  </div>
                 </div>
               </div>
-              <button
-                onClick={() => setWarehouseTheme(prev => prev === "warm" ? "cool" : "warm")}
-                style={styles.themeToggleBtn}
-                title="Cambiar ambiente visual del almacén"
-              >
-                <Icon name={warehouseTheme === "warm" ? "flame" : "sparkles"} size={14} color={warehouseTheme === "warm" ? "#FBBF24" : "#38BDF8"} />
-              </button>
-            </div>
-
-            <div style={styles.userCard}>
-              <div style={styles.userAvatar}>
-                {(currentUser.name || "US").slice(0, 2).toUpperCase()}
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {isSupabaseConfigured && (
+                  <button onClick={fetchDataFromSupabase} style={styles.themeToggleBtn} title="Sincronizar">
+                    <Icon name="refresh-cw" size={14} color="#94A3B8" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setWarehouseTheme(prev => prev === "warm" ? "cool" : "warm")}
+                  style={styles.themeToggleBtn}
+                  title="Cambiar ambiente visual"
+                >
+                  <Icon name={warehouseTheme === "warm" ? "flame" : "sparkles"} size={14} color={warehouseTheme === "warm" ? "#FBBF24" : "#38BDF8"} />
+                </button>
+                <button style={{ ...styles.themeToggleBtn, borderColor: "rgba(248, 113, 113, 0.3)" }} onClick={handleLogout} title="Cerrar sesión">
+                  <Icon name="log-out" size={14} color="#F87171" />
+                </button>
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={styles.userName}>{currentUser.name}</div>
-                <span style={{ ...styles.roleBadge, color: role === "Personal" ? "#C084FC" : "#34D399" }}>
-                  {currentUser.role}
+            </header>
+          ) : (
+            <aside style={styles.sidebar}>
+              <div style={styles.brand}>
+                <img
+                  src="logo.png"
+                  alt="Logo Almacén"
+                  onError={(e) => { e.target.style.display = "none"; }}
+                  style={{ width: 36, height: 36, objectFit: "contain" }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={styles.brandTitle}>Almacén</div>
+                  <div style={styles.brandSub}>
+                    {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setWarehouseTheme(prev => prev === "warm" ? "cool" : "warm")}
+                  style={styles.themeToggleBtn}
+                  title="Cambiar ambiente visual del almacén"
+                >
+                  <Icon name={warehouseTheme === "warm" ? "flame" : "sparkles"} size={14} color={warehouseTheme === "warm" ? "#FBBF24" : "#38BDF8"} />
+                </button>
+              </div>
+
+              <div style={styles.userCard}>
+                <div style={styles.userAvatar}>
+                  {(currentUser.name || "US").slice(0, 2).toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={styles.userName}>{currentUser.name}</div>
+                  <span style={{ ...styles.roleBadge, color: role === "Personal" ? "#C084FC" : "#34D399" }}>
+                    {currentUser.role}
+                  </span>
+                </div>
+                <button style={styles.logoutBtn} onClick={handleLogout} title="Cerrar sesión">
+                  <Icon name="log-out" size={14} color="#F87171" />
+                </button>
+              </div>
+
+              <nav style={styles.nav}>
+                {navItemsList.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setTab(item.id)}
+                    style={{ ...styles.navItem, ...(tab === item.id ? styles.navItemActive : {}) }}
+                  >
+                    <Icon name={item.icon} size={16} color={item.iconColor || "currentColor"} />
+                    <span>{item.label}</span>
+                    {item.badgePurple && <span style={styles.navBadgePurple}>{item.badgePurple}</span>}
+                    {item.badge && <span style={styles.navBadge}>{item.badge}</span>}
+                  </button>
+                ))}
+              </nav>
+
+              <div style={styles.footerStatus}>
+                <span style={styles.statusDot}></span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {isSyncing ? "Sincronizando..." : currentUser.email}
                 </span>
+                {isSupabaseConfigured && (
+                  <button onClick={fetchDataFromSupabase} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", color: "#94A3B8" }} title="Actualizar datos">
+                    <Icon name="refresh-cw" size={12} />
+                  </button>
+                )}
               </div>
-              <button style={styles.logoutBtn} onClick={handleLogout} title="Cerrar sesión">
-                <Icon name="log-out" size={14} color="#F87171" />
-              </button>
-            </div>
+            </aside>
+          )}
 
-            <nav style={styles.nav}>
-              <button onClick={() => setTab("dashboard")} style={{ ...styles.navItem, ...(tab === "dashboard" ? styles.navItemActive : {}) }}>
-                <Icon name="layout-dashboard" size={16} />
-                <span>Panel General</span>
-              </button>
-
-              {canAccessPersonal && (
-                <button onClick={() => setTab("personal")} style={{ ...styles.navItem, ...(tab === "personal" ? styles.navItemActive : {}) }}>
-                  <Icon name="wallet" size={16} color="#C084FC" />
-                  <span>Espacio Personal</span>
-                  <span style={styles.navBadgePurple}>Mío</span>
-                </button>
-              )}
-
-              <button onClick={() => setTab("inventario")} style={{ ...styles.navItem, ...(tab === "inventario" ? styles.navItemActive : {}) }}>
-                <Icon name="package" size={16} />
-                <span>Inventario</span>
-                {lowStock.length > 0 && <span style={styles.navBadge}>{lowStock.length}</span>}
-              </button>
-
-              {canAccessWarehouses && (
-                <button onClick={() => setTab("bodegas")} style={{ ...styles.navItem, ...(tab === "bodegas" ? styles.navItemActive : {}) }}>
-                  <Icon name="warehouse" size={16} />
-                  <span>Bodegas & Traspaso</span>
-                </button>
-              )}
-
-              {canAccessSales && (
-                <button onClick={() => setTab("ventas")} style={{ ...styles.navItem, ...(tab === "ventas" ? styles.navItemActive : {}) }}>
-                  <Icon name="shopping-cart" size={16} />
-                  <span>Ventas & Caja</span>
-                </button>
-              )}
-
-              {canAccessCustomers && (
-                <button onClick={() => setTab("clientes")} style={{ ...styles.navItem, ...(tab === "clientes" ? styles.navItemActive : {}) }}>
-                  <Icon name="users-round" size={16} />
-                  <span>Clientes</span>
-                </button>
-              )}
-
-              {canAccessFinances && (
-                <button onClick={() => setTab("gastos")} style={{ ...styles.navItem, ...(tab === "gastos" ? styles.navItemActive : {}) }}>
-                  <Icon name="receipt" size={16} />
-                  <span>Gastos Negocio</span>
-                </button>
-              )}
-
-              {(role === "Administrador") && (
-                <button onClick={() => setTab("usuarios")} style={{ ...styles.navItem, ...(tab === "usuarios" ? styles.navItemActive : {}) }}>
-                  <Icon name="shield-check" size={16} />
-                  <span>Equipo & Roles</span>
-                </button>
-              )}
-            </nav>
-
-            <div style={styles.footerStatus}>
-              <span style={styles.statusDot}></span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {isSyncing ? "Sincronizando..." : currentUser.email}
-              </span>
-              {isSupabaseConfigured && (
-                <button onClick={fetchDataFromSupabase} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", color: "#94A3B8" }} title="Actualizar datos">
-                  <Icon name="refresh-cw" size={12} />
-                </button>
-              )}
-            </div>
-          </aside>
-
-          <main style={styles.main}>
+          <main style={{ ...styles.main, ...(isMobile ? styles.mainMobile : {}) }}>
             {tab === "dashboard" && (
               <Dashboard
                 currentUser={currentUser}
@@ -911,19 +1039,21 @@
                 personalIncome={personalIncome}
                 personalExpense={personalExpense}
                 personalBalance={personalBalance}
+                personalCashBalance={personalCashBalance}
+                personalCardBalance={personalCardBalance}
                 onNewSale={() => setSaleModalState("new")}
-                onNewPersonal={() => setPersonalModalState("new")}
+                onNewPersonal={(preset) => setPersonalModalState(preset ? { isPreset: true, ...preset } : "new")}
                 onGoToPersonal={() => setTab("personal")}
                 onGoToInventory={() => setTab("inventario")}
                 onExportBusiness={handleExportBusinessFinances}
-                onExportPersonal={() => handleExportPersonalFinances(personalFinances, "Historial Completo", personalIncome, personalExpense, personalBalance)}
+                onExportPersonal={() => handleExportPersonalFinances(personalFinances, "Historial Completo", personalIncome, personalExpense, personalBalance, personalCashBalance, personalCardBalance)}
               />
             )}
 
             {tab === "personal" && canAccessPersonal && (
               <PersonalFinancesManager
                 personalFinances={personalFinances}
-                onNew={() => setPersonalModalState("new")}
+                onNew={(preset) => setPersonalModalState(preset ? { isPreset: true, ...preset } : "new")}
                 onEdit={(item) => setPersonalModalState(item)}
                 onDelete={handleDeletePersonalFinance}
                 onExport={handleExportPersonalFinances}
@@ -1047,7 +1177,7 @@
                     <h2 style={styles.pageTitle}>Distribución de Stock por Almacén</h2>
                   </div>
                   {canManageInventory && (
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button style={styles.amberBtn} onClick={() => setTransferModalOpen(true)}>
                         <Icon name="arrow-left-right" size={14} /> Traspasar entre Bodegas
                       </button>
@@ -1057,7 +1187,7 @@
                     </div>
                   )}
                 </div>
-                <div style={styles.dashGrid}>
+                <div className="responsive-2col" style={styles.dashGrid}>
                   {locations.map(loc => (
                     <div key={loc.id} style={styles.panel}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
@@ -1116,47 +1246,49 @@
                 )}
 
                 <div style={styles.panel}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr style={styles.tableHeaderRow}>
-                        <th style={{ padding: "12px 10px" }}>Fecha</th>
-                        <th>Cliente</th>
-                        <th>Detalle / Concepto</th>
-                        <th>Medio de Pago</th>
-                        <th>Total</th>
-                        <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredSales.length === 0 ? (
-                        <tr>
-                          <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
-                            {salesMonthFilter ? `No hay ventas registradas en ${formatMonthLabel(salesMonthFilter)}.` : "No hay ventas registradas."}
-                          </td>
+                  <div className="table-scroll">
+                    <table style={styles.table}>
+                      <thead>
+                        <tr style={styles.tableHeaderRow}>
+                          <th style={{ padding: "12px 10px" }}>Fecha</th>
+                          <th>Cliente</th>
+                          <th>Detalle / Concepto</th>
+                          <th>Medio de Pago</th>
+                          <th>Total</th>
+                          <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
                         </tr>
-                      ) : (
-                        filteredSales.map(s => (
-                          <tr key={s.id} style={styles.tableRow}>
-                            <td style={{ padding: 10, color: "#94A3B8" }}>{s.date}</td>
-                            <td style={{ fontWeight: 600, color: "#F8FAFC" }}>{s.customerName}</td>
-                            <td style={{ color: "#94A3B8" }}>{s.details || "Venta general"}</td>
-                            <td><span style={styles.badgeGray}>{s.paymentMethod}</span></td>
-                            <td style={{ color: "#34D399", fontWeight: 700 }}>{money(s.total)}</td>
-                            <td style={{ textAlign: "right", paddingRight: 10 }}>
-                              <button style={styles.actionIconBtn} onClick={() => setSaleModalState(s)} title="Modificar">
-                                <Icon name="pencil" size={14} color="#38BDF8" />
-                              </button>
-                              {activePerms.canDeleteRecords && (
-                                <button style={styles.actionIconBtn} onClick={() => handleDeleteSale(s.id)} title="Eliminar">
-                                  <Icon name="trash-2" size={14} color="#F87171" />
-                                </button>
-                              )}
+                      </thead>
+                      <tbody>
+                        {filteredSales.length === 0 ? (
+                          <tr>
+                            <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                              {salesMonthFilter ? `No hay ventas registradas en ${formatMonthLabel(salesMonthFilter)}.` : "No hay ventas registradas."}
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                        ) : (
+                          filteredSales.map(s => (
+                            <tr key={s.id} style={styles.tableRow}>
+                              <td style={{ padding: 10, color: "#94A3B8" }}>{s.date}</td>
+                              <td style={{ fontWeight: 600, color: "#F8FAFC" }}>{s.customerName}</td>
+                              <td style={{ color: "#94A3B8" }}>{s.details || "Venta general"}</td>
+                              <td><span style={styles.badgeGray}>{s.paymentMethod}</span></td>
+                              <td style={{ color: "#34D399", fontWeight: 700 }}>{money(s.total)}</td>
+                              <td style={{ textAlign: "right", paddingRight: 10 }}>
+                                <button style={styles.actionIconBtn} onClick={() => setSaleModalState(s)} title="Modificar">
+                                  <Icon name="pencil" size={14} color="#38BDF8" />
+                                </button>
+                                {activePerms.canDeleteRecords && (
+                                  <button style={styles.actionIconBtn} onClick={() => handleDeleteSale(s.id)} title="Eliminar">
+                                    <Icon name="trash-2" size={14} color="#F87171" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
@@ -1201,6 +1333,34 @@
               />
             )}
           </main>
+
+          {isMobile && (
+            <nav className="mobile-bottom-nav" style={styles.mobileBottomNav}>
+              {navItemsList.map(item => {
+                const active = tab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setTab(item.id)}
+                    style={{
+                      ...styles.mobileNavBtn,
+                      ...(active ? styles.mobileNavBtnActive : {})
+                    }}
+                  >
+                    <div style={{ position: "relative", display: "inline-flex" }}>
+                      <Icon name={item.icon} size={18} color={active ? (item.iconColor || "#34D399") : "#94A3B8"} />
+                      {item.badge && (
+                        <span style={styles.mobileNavDotBadge}>{item.badge}</span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: 10.5, fontWeight: active ? 700 : 500, color: active ? "#F8FAFC" : "#94A3B8" }}>
+                      {item.shortLabel}
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          )}
 
           {/* MODALES */}
           {productModalState && (
@@ -1280,7 +1440,7 @@
 
       return (
         <div style={styles.overlay} onClick={onClose}>
-          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+          <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
             <h3 style={styles.modalTitle}>Traspasar Mercadería entre Bodegas 🚚</h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
@@ -1289,7 +1449,7 @@
                   {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                 </select>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>Desde Origen</label>
                   <select style={styles.glassInput} value={fromLocId} onChange={e => setFromLocId(e.target.value)}>
@@ -1365,12 +1525,12 @@
 
       return (
         <div style={styles.overlay} onClick={onClose}>
-          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+          <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
             <h3 style={styles.modalTitle}>
               {product ? "Modificar Ficha de Producto" : "Nuevo Producto en Inventario 📦"}
             </h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 10 }}>
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>Nombre del Producto</label>
                   <input style={styles.glassInput} value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Polera Oversize" required />
@@ -1383,7 +1543,7 @@
                 </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>SKU / Código Referencia</label>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -1397,7 +1557,7 @@
                 </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              <div className="responsive-3col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>Costo Unitario ($)</label>
                   <input style={styles.glassInput} type="number" min="0" value={costPrice} onChange={e => setCostPrice(e.target.value)} required />
@@ -1416,7 +1576,7 @@
                 <span style={{ fontSize: 11.5, color: "#38BDF8", fontWeight: 600, display: "block", marginBottom: 8 }}>
                   Distribución de Existencias por Bodega:
                 </span>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   {locations.map(loc => (
                     <div key={loc.id}>
                       <label style={{ ...styles.inputLabel, fontSize: 11, color: "#CBD5E1" }}>{loc.name}</label>
@@ -1446,6 +1606,7 @@
     function Dashboard({
       currentUser, canAccessSales, canAccessPersonal, canViewCosts, sales, expenses, products, lowStock, locations, customers,
       totalSales, totalExpenses, profit, personalFinances, personalIncome, personalExpense, personalBalance,
+      personalCashBalance, personalCardBalance,
       onNewSale, onNewPersonal, onGoToPersonal, onGoToInventory, onExportBusiness, onExportPersonal
     }) {
       const [selectedProdFilter, setSelectedProdFilter] = useState("all");
@@ -1730,7 +1891,7 @@
             </button>
           </div>
 
-          <div style={styles.kpiGrid}>
+          <div className="responsive-kpi-grid" style={styles.kpiGrid}>
             <div style={styles.kpiCard}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={styles.kpiLabel}>Ventas del Negocio</span>
@@ -1802,7 +1963,7 @@
               </div>
 
               {inventoryProjection && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: 10, marginBottom: 14 }}>
+                <div className="responsive-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: 10, marginBottom: 14 }}>
                   <div style={styles.miniProjectionCard}>
                     <span style={styles.miniLabel}>Costo Invertido (Stock)</span>
                     <strong style={{ color: "#F87171", fontSize: 15 }}>
@@ -1845,7 +2006,7 @@
             </div>
           )}
 
-          <div style={styles.dashGrid}>
+          <div className="responsive-2col" style={styles.dashGrid}>
             <div style={styles.panel}>
               <div style={styles.panelTitleRow}>
                 <h3 style={styles.panelTitle}>Rendimiento Comercial (Últimos 7 días)</h3>
@@ -1870,12 +2031,12 @@
           {/* SECCIÓN 2: ESPACIO & FINANZAS PERSONALES */}
           {canAccessPersonal && (
             <div style={{ marginTop: 28 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
                 <div style={{ ...styles.sectionHeader, borderLeftColor: "#A855F7" }}>
                   <Icon name="wallet" size={17} color="#C084FC" />
                   <span style={{ ...styles.sectionTitle, color: "#E9D5FF" }}>Espacio de Cosas Personales & Finanzas</span>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button style={styles.purpleExportBtn} onClick={onExportPersonal}>
                     <Icon name="file-spreadsheet" size={14} color="#C084FC" /> Exportar Personal
                   </button>
@@ -1885,57 +2046,114 @@
                 </div>
               </div>
 
-              <div style={styles.kpiGrid}>
-                <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={styles.kpiLabel}>Ingresos Personales</span>
-                    <Icon name="arrow-down-left" size={15} color="#34D399" />
+              <div className="responsive-kpi-grid" style={styles.kpiGrid}>
+                <div style={{ ...styles.kpiCard, borderColor: "rgba(52, 211, 153, 0.35)", background: "rgba(16, 185, 129, 0.06)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ ...styles.kpiLabel, color: "#A7F3D0" }}>💵 Efectivo en Bolsillo</span>
+                    <Icon name="banknote" size={16} color="#34D399" />
                   </div>
-                  <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(personalIncome)}</div>
-                  <span style={styles.kpiSub}>Retiros de negocio y otros</span>
+                  <div style={{ ...styles.kpiValue, color: personalCashBalance >= 0 ? "#34D399" : "#F87171" }}>
+                    {money(personalCashBalance)}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <button
+                      type="button"
+                      style={styles.quickActionPlusBtn}
+                      onClick={() => onNewPersonal({ type: "ingreso", wallet: "Efectivo" })}
+                    >
+                      + Agregar
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.quickActionMinusBtn}
+                      onClick={() => onNewPersonal({ type: "gasto", wallet: "Efectivo" })}
+                    >
+                      - Restar
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ ...styles.kpiCard, borderColor: "rgba(56, 189, 248, 0.35)", background: "rgba(56, 189, 248, 0.06)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ ...styles.kpiLabel, color: "#BAE6FD" }}>💳 Dinero en Tarjeta</span>
+                    <Icon name="credit-card" size={16} color="#38BDF8" />
+                  </div>
+                  <div style={{ ...styles.kpiValue, color: personalCardBalance >= 0 ? "#38BDF8" : "#F87171" }}>
+                    {money(personalCardBalance)}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <button
+                      type="button"
+                      style={styles.quickActionPlusBtn}
+                      onClick={() => onNewPersonal({ type: "ingreso", wallet: "Tarjeta" })}
+                    >
+                      + Agregar
+                    </button>
+                    <button
+                      type="button"
+                      style={styles.quickActionMinusBtn}
+                      onClick={() => onNewPersonal({ type: "gasto", wallet: "Tarjeta" })}
+                    >
+                      - Restar
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={styles.kpiLabel}>Gastos Personales</span>
-                    <Icon name="arrow-up-right" size={15} color="#F87171" />
+                    <span style={styles.kpiLabel}>Flujo Personal Global</span>
+                    <Icon name="activity" size={15} color="#C084FC" />
                   </div>
-                  <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(personalExpense)}</div>
-                  <span style={styles.kpiSub}>Gastos diarios, ocio y vida</span>
+                  <div style={{ fontSize: 13, marginTop: 8, display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#94A3B8" }}>Ingresos:</span>
+                    <strong style={{ color: "#34D399" }}>+{money(personalIncome)}</strong>
+                  </div>
+                  <div style={{ fontSize: 13, marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#94A3B8" }}>Gastos:</span>
+                    <strong style={{ color: "#F87171" }}>-{money(personalExpense)}</strong>
+                  </div>
                 </div>
 
                 <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={styles.kpiLabel}>Saldo Personal Disponible</span>
+                    <span style={styles.kpiLabel}>Saldo Personal Total</span>
                     <Icon name="piggy-bank" size={16} color="#C084FC" />
                   </div>
                   <div style={{ ...styles.kpiValue, color: personalBalance >= 0 ? "#C084FC" : "#F87171" }}>
                     {money(personalBalance)}
                   </div>
-                  <span style={styles.kpiSub}>Balance neto en bolsillo</span>
+                  <span style={styles.kpiSub}>Suma Efectivo + Tarjeta</span>
                 </div>
               </div>
 
-              <div style={styles.dashGrid}>
+              <div className="responsive-2col" style={styles.dashGrid}>
                 <div style={styles.panel}>
                   <div style={styles.panelTitleRow}>
                     <h3 style={styles.panelTitle}>Últimos Movimientos Personales</h3>
-                    <button style={styles.smallGlassBtn} onClick={onNewPersonal}>+ Agregar</button>
+                    <button style={styles.smallGlassBtn} onClick={() => onNewPersonal()}>+ Agregar</button>
                   </div>
                   {personalFinances.length === 0 ? (
                     <p style={{ color: "#64748B", fontSize: 13 }}>No has registrado movimientos personales aún.</p>
                   ) : (
-                    personalFinances.slice(0, 4).map(item => (
-                      <div key={item.id} style={styles.listRow}>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 13, color: "#F1F5F9" }}>{item.description || item.category}</div>
-                          <span style={{ fontSize: 11, color: "#94A3B8" }}>{item.date} • {item.category}</span>
+                    personalFinances.slice(0, 4).map(item => {
+                      const w = getPersonalWallet(item);
+                      return (
+                        <div key={item.id} style={styles.listRow}>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 13, color: "#F1F5F9", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <span>{item.description || item.category}</span>
+                              <span style={w === "Efectivo" ? styles.walletBadgeCash : styles.walletBadgeCard}>
+                                {w === "Efectivo" ? "💵 Efectivo" : "💳 Tarjeta"}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: 11, color: "#94A3B8" }}>{item.date} • {item.category}</span>
+                          </div>
+                          <strong style={{ color: item.type === "ingreso" ? "#34D399" : "#F87171", fontSize: 13 }}>
+                            {item.type === "ingreso" ? "+" : "-"}{money(item.amount)}
+                          </strong>
                         </div>
-                        <strong style={{ color: item.type === "ingreso" ? "#34D399" : "#F87171", fontSize: 13 }}>
-                          {item.type === "ingreso" ? "+" : "-"}{money(item.amount)}
-                        </strong>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
 
@@ -1966,9 +2184,10 @@
       );
     }
 
-    // ============ MÓDULO PERSONAL CON FILTRO POR MES ============
+    // ============ MÓDULO PERSONAL CON SEPARACIÓN EFECTIVO Y TARJETA + FILTRO POR MES ============
     function PersonalFinancesManager({ personalFinances, onNew, onEdit, onDelete, onExport }) {
       const [selectedMonth, setSelectedMonth] = useState("");
+      const [selectedWalletFilter, setSelectedWalletFilter] = useState("Todos");
 
       const availableMonths = useMemo(() => {
         const currentYM = new Date().toISOString().slice(0, 7);
@@ -1977,10 +2196,15 @@
         return Array.from(monthsSet).sort().reverse();
       }, [personalFinances]);
 
-      const filteredFinances = useMemo(() => {
+      const monthFilteredFinances = useMemo(() => {
         if (!selectedMonth) return personalFinances;
         return personalFinances.filter(p => (p.date || "").startsWith(selectedMonth));
       }, [personalFinances, selectedMonth]);
+
+      const filteredFinances = useMemo(() => {
+        if (selectedWalletFilter === "Todos") return monthFilteredFinances;
+        return monthFilteredFinances.filter(p => getPersonalWallet(p) === selectedWalletFilter);
+      }, [monthFilteredFinances, selectedWalletFilter]);
 
       const periodIncome = useMemo(() => {
         return filteredFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
@@ -1990,6 +2214,22 @@
         return filteredFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
       }, [filteredFinances]);
 
+      const cashIncome = useMemo(() => {
+        return monthFilteredFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
+      }, [monthFilteredFinances]);
+      const cashExpense = useMemo(() => {
+        return monthFilteredFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
+      }, [monthFilteredFinances]);
+      const cashBalance = cashIncome - cashExpense;
+
+      const cardIncome = useMemo(() => {
+        return monthFilteredFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
+      }, [monthFilteredFinances]);
+      const cardExpense = useMemo(() => {
+        return monthFilteredFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
+      }, [monthFilteredFinances]);
+      const cardBalance = cardIncome - cardExpense;
+
       const periodBalance = periodIncome - periodExpense;
       const currentPeriodLabel = selectedMonth ? formatMonthLabel(selectedMonth) : "Historial Completo";
 
@@ -1997,10 +2237,10 @@
         <div>
           <div style={styles.pageHeader}>
             <div>
-              <div style={{ ...styles.eyebrow, color: "#C084FC" }}>GESTIÓN INDEPENDIENTE</div>
-              <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳</h2>
+              <div style={{ ...styles.eyebrow, color: "#C084FC" }}>GESTIÓN INDEPENDIENTE • EFECTIVO & TARJETA</div>
+              <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳💵</h2>
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <Icon name="calendar" size={15} color="#C084FC" />
                 <select
@@ -2015,96 +2255,207 @@
                 </select>
               </div>
 
-              <button style={styles.purpleExportBtn} onClick={() => onExport(filteredFinances, currentPeriodLabel, periodIncome, periodExpense, periodBalance)}>
-                <Icon name="file-spreadsheet" size={14} color="#C084FC" /> Exportar a Google Sheets
+              <select
+                style={{ ...styles.filterSelect, borderColor: "rgba(56, 189, 248, 0.3)" }}
+                value={selectedWalletFilter}
+                onChange={e => setSelectedWalletFilter(e.target.value)}
+              >
+                <option value="Todos">👛 Todos (Efectivo + Tarjeta)</option>
+                <option value="Efectivo">💵 Solo Efectivo</option>
+                <option value="Tarjeta">💳 Solo Tarjeta</option>
+              </select>
+
+              <button style={styles.purpleExportBtn} onClick={() => onExport(filteredFinances, currentPeriodLabel, periodIncome, periodExpense, periodBalance, cashBalance, cardBalance)}>
+                <Icon name="file-spreadsheet" size={14} color="#C084FC" /> Exportar Sheets
               </button>
-              <button style={styles.purpleBtn} onClick={onNew}>
-                <Icon name="plus" size={14} /> Registrar Movimiento
+              <button style={styles.purpleBtn} onClick={() => onNew()}>
+                <Icon name="plus" size={14} /> Nuevo Movimiento
               </button>
             </div>
           </div>
 
-          {selectedMonth && (
-            <div style={{ ...styles.filterBanner, borderColor: "rgba(168, 85, 247, 0.3)", background: "rgba(168, 85, 247, 0.08)" }}>
+          {(selectedMonth || selectedWalletFilter !== "Todos") && (
+            <div style={{ ...styles.filterBanner, borderColor: "rgba(168, 85, 247, 0.3)", background: "rgba(168, 85, 247, 0.08)", flexWrap: "wrap" }}>
               <Icon name="filter" size={14} color="#C084FC" />
               <span style={{ color: "#E9D5FF" }}>
-                Visualizando datos de: <strong>{formatMonthLabel(selectedMonth)}</strong>
+                Filtrando por: <strong>{selectedMonth ? formatMonthLabel(selectedMonth) : "Todos los meses"}</strong>
+                {selectedWalletFilter !== "Todos" ? ` • Medio: ${selectedWalletFilter}` : ""}
               </span>
-              <button style={{ ...styles.clearFilterBtn, color: "#C084FC" }} onClick={() => setSelectedMonth("")}>Ver todo el historial</button>
+              <button
+                style={{ ...styles.clearFilterBtn, color: "#C084FC" }}
+                onClick={() => { setSelectedMonth(""); setSelectedWalletFilter("Todos"); }}
+              >
+                Limpiar filtros
+              </button>
             </div>
           )}
 
-          <div style={styles.kpiGrid}>
+          {/* SEPARACIÓN PRINCIPAL: TARJETA DE EFECTIVO Y TARJETA BANCARIA CON BOTONES + AGREGAR / - RESTAR */}
+          <div className="responsive-2col" style={{ ...styles.dashGrid, marginBottom: 16 }}>
+            <div style={{ ...styles.panel, borderColor: "rgba(52, 211, 153, 0.35)", background: "linear-gradient(145deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.6) 100%)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#6EE7B7", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    💵 Bolsillo en Efectivo
+                  </span>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: cashBalance >= 0 ? "#34D399" : "#F87171", marginTop: 4 }}>
+                    {money(cashBalance)}
+                  </div>
+                </div>
+                <div style={{ background: "rgba(16, 185, 129, 0.18)", padding: 10, borderRadius: 12, border: "1px solid rgba(52, 211, 153, 0.3)" }}>
+                  <Icon name="banknote" size={22} color="#34D399" />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#CBD5E1", margin: "12px 0", padding: "8px 10px", background: "rgba(0,0,0,0.22)", borderRadius: 8 }}>
+                <span>Entradas: <strong style={{ color: "#34D399" }}>+{money(cashIncome)}</strong></span>
+                <span>Salidas: <strong style={{ color: "#F87171" }}>-{money(cashExpense)}</strong></span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button
+                  type="button"
+                  style={styles.walletPlusBtn}
+                  onClick={() => onNew({ type: "ingreso", wallet: "Efectivo" })}
+                >
+                  <Icon name="plus-circle" size={15} color="#34D399" />
+                  <span>+ Agregar Efectivo</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.walletMinusBtn}
+                  onClick={() => onNew({ type: "gasto", wallet: "Efectivo" })}
+                >
+                  <Icon name="minus-circle" size={15} color="#F87171" />
+                  <span>- Restar Efectivo</span>
+                </button>
+              </div>
+            </div>
+
+            <div style={{ ...styles.panel, borderColor: "rgba(56, 189, 248, 0.35)", background: "linear-gradient(145deg, rgba(56, 189, 248, 0.1) 0%, rgba(15, 23, 42, 0.6) 100%)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#7DD3FC", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    💳 Dinero en Tarjeta / Banco
+                  </span>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: cardBalance >= 0 ? "#38BDF8" : "#F87171", marginTop: 4 }}>
+                    {money(cardBalance)}
+                  </div>
+                </div>
+                <div style={{ background: "rgba(56, 189, 248, 0.18)", padding: 10, borderRadius: 12, border: "1px solid rgba(56, 189, 248, 0.3)" }}>
+                  <Icon name="credit-card" size={22} color="#38BDF8" />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#CBD5E1", margin: "12px 0", padding: "8px 10px", background: "rgba(0,0,0,0.22)", borderRadius: 8 }}>
+                <span>Entradas: <strong style={{ color: "#34D399" }}>+{money(cardIncome)}</strong></span>
+                <span>Salidas: <strong style={{ color: "#F87171" }}>-{money(cardExpense)}</strong></span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button
+                  type="button"
+                  style={styles.walletPlusBtn}
+                  onClick={() => onNew({ type: "ingreso", wallet: "Tarjeta" })}
+                >
+                  <Icon name="plus-circle" size={15} color="#34D399" />
+                  <span>+ Agregar Tarjeta</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.walletMinusBtn}
+                  onClick={() => onNew({ type: "gasto", wallet: "Tarjeta" })}
+                >
+                  <Icon name="minus-circle" size={15} color="#F87171" />
+                  <span>- Restar Tarjeta</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="responsive-kpi-grid" style={styles.kpiGrid}>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
               <span style={styles.kpiLabel}>
-                {selectedMonth ? `Ingresos (${formatMonthLabel(selectedMonth)})` : "Ingresos Registrados"}
+                {selectedMonth ? `Ingresos (${formatMonthLabel(selectedMonth)})` : "Ingresos Totales"}
               </span>
               <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(periodIncome)}</div>
             </div>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
               <span style={styles.kpiLabel}>
-                {selectedMonth ? `Gastos (${formatMonthLabel(selectedMonth)})` : "Gastos Registrados"}
+                {selectedMonth ? `Gastos (${formatMonthLabel(selectedMonth)})` : "Gastos Totales"}
               </span>
               <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(periodExpense)}</div>
             </div>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
               <span style={styles.kpiLabel}>
-                {selectedMonth ? `Saldo del Mes` : "Saldo Personal Neto"}
+                {selectedMonth ? `Saldo Neto del Mes` : "Saldo Personal Combinado"}
               </span>
               <div style={{ ...styles.kpiValue, color: periodBalance >= 0 ? "#C084FC" : "#F87171" }}>{money(periodBalance)}</div>
+              <span style={styles.kpiSub}>Efectivo + Tarjeta</span>
             </div>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
-              <span style={styles.kpiLabel}>Movimientos del Período</span>
+              <span style={styles.kpiLabel}>Movimientos Listados</span>
               <div style={{ ...styles.kpiValue, color: "#F1F5F9" }}>{filteredFinances.length}</div>
             </div>
           </div>
 
           <div style={styles.panel}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.tableHeaderRow}>
-                  <th style={{ padding: "12px 10px" }}>Fecha</th>
-                  <th>Tipo</th>
-                  <th>Categoría</th>
-                  <th>Descripción</th>
-                  <th>Monto</th>
-                  <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFinances.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
-                      {selectedMonth ? `No hay movimientos personales registrados en ${formatMonthLabel(selectedMonth)}.` : "Aún no tienes movimientos personales registrados."}
-                    </td>
+            <div className="table-scroll">
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeaderRow}>
+                    <th style={{ padding: "12px 10px" }}>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Medio</th>
+                    <th>Categoría</th>
+                    <th>Descripción</th>
+                    <th>Monto</th>
+                    <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
                   </tr>
-                ) : (
-                  filteredFinances.map(item => (
-                    <tr key={item.id} style={styles.tableRow}>
-                      <td style={{ padding: 10, color: "#94A3B8" }}>{item.date}</td>
-                      <td>
-                        <span style={item.type === "ingreso" ? styles.badgeGreen : styles.badgeRed}>
-                          {item.type === "ingreso" ? "Ingreso" : "Gasto"}
-                        </span>
-                      </td>
-                      <td style={{ color: "#E2E8F0" }}>{item.category}</td>
-                      <td style={{ color: "#94A3B8" }}>{item.description || "-"}</td>
-                      <td style={{ fontWeight: 700, color: item.type === "ingreso" ? "#34D399" : "#F87171" }}>
-                        {item.type === "ingreso" ? "+" : "-"}{money(item.amount)}
-                      </td>
-                      <td style={{ textAlign: "right", paddingRight: 10 }}>
-                        <button style={styles.actionIconBtn} onClick={() => onEdit(item)} title="Editar">
-                          <Icon name="pencil" size={14} color="#C084FC" />
-                        </button>
-                        <button style={styles.actionIconBtn} onClick={() => onDelete(item.id)} title="Eliminar">
-                          <Icon name="trash-2" size={14} color="#F87171" />
-                        </button>
+                </thead>
+                <tbody>
+                  {filteredFinances.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                        {selectedMonth ? `No hay movimientos personales registrados en ${formatMonthLabel(selectedMonth)}.` : "Aún no tienes movimientos personales registrados."}
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredFinances.map(item => {
+                      const wallet = getPersonalWallet(item);
+                      return (
+                        <tr key={item.id} style={styles.tableRow}>
+                          <td style={{ padding: 10, color: "#94A3B8" }}>{item.date}</td>
+                          <td>
+                            <span style={item.type === "ingreso" ? styles.badgeGreen : styles.badgeRed}>
+                              {item.type === "ingreso" ? "+ Ingreso" : "- Gasto"}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={wallet === "Efectivo" ? styles.walletBadgeCash : styles.walletBadgeCard}>
+                              {wallet === "Efectivo" ? "💵 Efectivo" : "💳 Tarjeta"}
+                            </span>
+                          </td>
+                          <td style={{ color: "#E2E8F0" }}>{item.category}</td>
+                          <td style={{ color: "#94A3B8" }}>{item.description || "-"}</td>
+                          <td style={{ fontWeight: 700, color: item.type === "ingreso" ? "#34D399" : "#F87171" }}>
+                            {item.type === "ingreso" ? "+" : "-"}{money(item.amount)}
+                          </td>
+                          <td style={{ textAlign: "right", paddingRight: 10 }}>
+                            <button style={styles.actionIconBtn} onClick={() => onEdit(item)} title="Editar">
+                              <Icon name="pencil" size={14} color="#C084FC" />
+                            </button>
+                            <button style={styles.actionIconBtn} onClick={() => onDelete(item.id)} title="Eliminar">
+                              <Icon name="trash-2" size={14} color="#F87171" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       );
@@ -2119,7 +2470,7 @@
               <div style={styles.eyebrow}>CONTROL DE EGRESOS EMPRESARIALES</div>
               <h2 style={styles.pageTitle}>Registro de Gastos del Negocio</h2>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button style={styles.sheetsExportBtn} onClick={onExport} title="Exportar gastos a Google Sheets">
                 <Icon name="file-spreadsheet" size={14} color="#34D399" /> Exportar Sheets
               </button>
@@ -2129,7 +2480,7 @@
             </div>
           </div>
 
-          <div style={styles.kpiGrid}>
+          <div className="responsive-kpi-grid" style={styles.kpiGrid}>
             <div style={styles.kpiCard}>
               <span style={styles.kpiLabel}>Total Gastado Negocio</span>
               <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(totalExpenses)}</div>
@@ -2141,43 +2492,45 @@
           </div>
 
           <div style={styles.panel}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.tableHeaderRow}>
-                  <th style={{ padding: "12px 10px" }}>Fecha</th>
-                  <th>Categoría</th>
-                  <th>Descripción</th>
-                  <th>Monto</th>
-                  <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {expenses.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
-                      No hay gastos registrados para el negocio.
-                    </td>
+            <div className="table-scroll">
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeaderRow}>
+                    <th style={{ padding: "12px 10px" }}>Fecha</th>
+                    <th>Categoría</th>
+                    <th>Descripción</th>
+                    <th>Monto</th>
+                    <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
                   </tr>
-                ) : (
-                  expenses.map(e => (
-                    <tr key={e.id} style={styles.tableRow}>
-                      <td style={{ padding: 10, color: "#94A3B8" }}>{e.date}</td>
-                      <td><span style={styles.badgeGray}>{e.category}</span></td>
-                      <td style={{ color: "#94A3B8" }}>{e.description || "-"}</td>
-                      <td style={{ color: "#F87171", fontWeight: 700 }}>{money(e.amount)}</td>
-                      <td style={{ textAlign: "right", paddingRight: 10 }}>
-                        <button style={styles.actionIconBtn} onClick={() => onEdit(e)} title="Modificar">
-                          <Icon name="pencil" size={14} color="#38BDF8" />
-                        </button>
-                        <button style={styles.actionIconBtn} onClick={() => onDelete(e.id)} title="Eliminar">
-                          <Icon name="trash-2" size={14} color="#F87171" />
-                        </button>
+                </thead>
+                <tbody>
+                  {expenses.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                        No hay gastos registrados para el negocio.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    expenses.map(e => (
+                      <tr key={e.id} style={styles.tableRow}>
+                        <td style={{ padding: 10, color: "#94A3B8" }}>{e.date}</td>
+                        <td><span style={styles.badgeGray}>{e.category}</span></td>
+                        <td style={{ color: "#94A3B8" }}>{e.description || "-"}</td>
+                        <td style={{ color: "#F87171", fontWeight: 700 }}>{money(e.amount)}</td>
+                        <td style={{ textAlign: "right", paddingRight: 10 }}>
+                          <button style={styles.actionIconBtn} onClick={() => onEdit(e)} title="Modificar">
+                            <Icon name="pencil" size={14} color="#38BDF8" />
+                          </button>
+                          <button style={styles.actionIconBtn} onClick={() => onDelete(e.id)} title="Eliminar">
+                            <Icon name="trash-2" size={14} color="#F87171" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       );
@@ -2248,45 +2601,47 @@
           </div>
 
           <div style={{ ...styles.panel, marginTop: 16 }}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.tableHeaderRow}>
-                  <th style={{ padding: "12px 10px" }}>Nombre</th>
-                  <th>Teléfono</th>
-                  <th>N° Compras</th>
-                  <th>Total Comprado</th>
-                  <th>Última Compra</th>
-                  <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {customerStats.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
-                      No hay clientes registrados todavía.
-                    </td>
+            <div className="table-scroll">
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeaderRow}>
+                    <th style={{ padding: "12px 10px" }}>Nombre</th>
+                    <th>Teléfono</th>
+                    <th>N° Compras</th>
+                    <th>Total Comprado</th>
+                    <th>Última Compra</th>
+                    <th style={{ textAlign: "right", paddingRight: 10 }}>Acciones</th>
                   </tr>
-                ) : (
-                  customerStats.map(c => (
-                    <tr key={c.id} style={styles.tableRow}>
-                      <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{c.name}</td>
-                      <td style={{ color: "#94A3B8" }}>{c.phone || "-"}</td>
-                      <td><span style={styles.badgeGray}>{c.purchaseCount} ped.</span></td>
-                      <td style={{ color: "#34D399", fontWeight: 700 }}>{money(c.totalSpent)}</td>
-                      <td style={{ color: "#94A3B8" }}>{c.lastPurchase || "-"}</td>
-                      <td style={{ textAlign: "right", paddingRight: 10 }}>
-                        <button style={styles.actionIconBtn} onClick={() => onEdit(c)} title="Modificar">
-                          <Icon name="pencil" size={14} color="#38BDF8" />
-                        </button>
-                        <button style={styles.actionIconBtn} onClick={() => onDelete(c.id)} title="Eliminar">
-                          <Icon name="trash-2" size={14} color="#F87171" />
-                        </button>
+                </thead>
+                <tbody>
+                  {customerStats.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ padding: 24, textAlign: "center", color: "#64748B" }}>
+                        No hay clientes registrados todavía.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    customerStats.map(c => (
+                      <tr key={c.id} style={styles.tableRow}>
+                        <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{c.name}</td>
+                        <td style={{ color: "#94A3B8" }}>{c.phone || "-"}</td>
+                        <td><span style={styles.badgeGray}>{c.purchaseCount} ped.</span></td>
+                        <td style={{ color: "#34D399", fontWeight: 700 }}>{money(c.totalSpent)}</td>
+                        <td style={{ color: "#94A3B8" }}>{c.lastPurchase || "-"}</td>
+                        <td style={{ textAlign: "right", paddingRight: 10 }}>
+                          <button style={styles.actionIconBtn} onClick={() => onEdit(c)} title="Modificar">
+                            <Icon name="pencil" size={14} color="#38BDF8" />
+                          </button>
+                          <button style={styles.actionIconBtn} onClick={() => onDelete(c.id)} title="Eliminar">
+                            <Icon name="trash-2" size={14} color="#F87171" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       );
@@ -2328,7 +2683,7 @@
 
       return (
         <div style={styles.overlay} onClick={onClose}>
-          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+          <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
             <h3 style={styles.modalTitle}>{sale ? "Modificar Venta" : "Registrar Nueva Venta"}</h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {!sale && products && products.length > 0 && (
@@ -2336,7 +2691,7 @@
                   <span style={{ fontSize: 11, color: "#FBBF24", fontWeight: 600, display: "block", marginBottom: 6 }}>
                     ⚡ Seleccionar Producto del Almacén (Descuenta Stock Automáticamente):
                   </span>
-                  <div style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 1fr", gap: 8 }}>
+                  <div className="responsive-3col" style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 1fr", gap: 8 }}>
                     <select style={styles.glassInput} value={selectedProductId} onChange={e => handleQuickSelectProduct(e.target.value, selectedQty)}>
                       <option value="">-- Venta manual libre --</option>
                       {products.map(p => <option key={p.id} value={p.id}>{p.name} ({money(p.salePrice)})</option>)}
@@ -2369,7 +2724,7 @@
                 <label style={styles.inputLabel}>Detalle o Concepto</label>
                 <input style={styles.glassInput} value={details} onChange={e => setDetails(e.target.value)} placeholder="Ej: 2x Poleras Oversize" />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>Medio de Pago</label>
                   <select style={styles.glassInput} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
@@ -2412,7 +2767,7 @@
 
       return (
         <div style={styles.overlay} onClick={onClose}>
-          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+          <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
             <h3 style={styles.modalTitle}>{expense ? "Modificar Gasto Negocio" : "Registrar Gasto de Negocio"}</h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
@@ -2425,7 +2780,7 @@
                 <label style={styles.inputLabel}>Descripción</label>
                 <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej: Pago de luz o insumos" />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>Monto ($)</label>
                   <input style={styles.glassInput} type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required />
@@ -2457,7 +2812,7 @@
 
       return (
         <div style={styles.overlay} onClick={onClose}>
-          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+          <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
             <h3 style={styles.modalTitle}>{customer ? "Modificar Cliente" : "Agregar Nuevo Cliente"}</h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
@@ -2479,41 +2834,86 @@
     }
 
     function PersonalFinanceModal({ item, onClose, onSave }) {
+      const isEditing = Boolean(item && item.id && !item.isPreset);
       const [type, setType] = useState(item?.type || "gasto");
-      const [category, setCategory] = useState(item?.category || PERSONAL_CATEGORIES[0]);
+      const [wallet, setWallet] = useState(item?.wallet ? item.wallet : (isEditing ? getPersonalWallet(item) : "Tarjeta"));
+      const [category, setCategory] = useState(
+        item?.category || (item?.type === "ingreso" ? "Retiro de Ganancias" : PERSONAL_CATEGORIES[0])
+      );
       const [description, setDescription] = useState(item?.description || "");
-      const [amount, setAmount] = useState(item?.amount || 0);
+      const [amount, setAmount] = useState(item?.amount || "");
       const [date, setDate] = useState(item?.date || new Date().toISOString().slice(0, 10));
 
       const handleSubmit = (e) => {
         e.preventDefault();
         if (Number(amount) <= 0) return;
-        onSave({ type, category, description: sanitizeText(description), amount: Number(amount), date });
+        onSave({
+          type,
+          wallet,
+          category,
+          description: sanitizeText(description),
+          amount: Number(amount),
+          date
+        });
       };
 
       return (
         <div style={styles.overlay} onClick={onClose}>
-          <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+          <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
             <h3 style={{ ...styles.modalTitle, color: "#E9D5FF" }}>
-              {item ? "Modificar Movimiento Personal" : "Nuevo Movimiento Personal 👤"}
+              {isEditing
+                ? "Modificar Movimiento Personal"
+                : `${type === "ingreso" ? "Agregar Dinero (+)" : "Restar / Registrar Gasto (-)"} en ${wallet === "Efectivo" ? "💵 Efectivo" : "💳 Tarjeta"}`}
             </h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <label style={styles.inputLabel}>Tipo de Movimiento</label>
-                <div style={{ display: "flex", gap: 8 }}>
+                <label style={styles.inputLabel}>1. ¿Dónde quieres agregar o restar dinero?</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <button
                     type="button"
-                    style={{ ...styles.typeTabBtn, ...(type === "ingreso" ? styles.typeTabActiveGreen : {}) }}
-                    onClick={() => setType("ingreso")}
+                    style={{
+                      ...styles.typeTabBtn,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 8px",
+                      ...(wallet === "Efectivo"
+                        ? { background: "rgba(16, 185, 129, 0.22)", color: "#6EE7B7", borderColor: "rgba(52, 211, 153, 0.55)" }
+                        : {})
+                    }}
+                    onClick={() => setWallet("Efectivo")}
                   >
-                    + Ingreso / Retiro
+                    <span>💵 Efectivo</span>
                   </button>
                   <button
                     type="button"
-                    style={{ ...styles.typeTabBtn, ...(type === "gasto" ? styles.typeTabActiveRed : {}) }}
+                    style={{
+                      ...styles.typeTabBtn,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 8px",
+                      ...(wallet === "Tarjeta"
+                        ? { background: "rgba(56, 189, 248, 0.22)", color: "#7DD3FC", borderColor: "rgba(56, 189, 248, 0.55)" }
+                        : {})
+                    }}
+                    onClick={() => setWallet("Tarjeta")}
+                  >
+                    <span>💳 Dinero en Tarjeta</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label style={styles.inputLabel}>2. Acción a Realizar</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button
+                    type="button"
+                    style={{ ...styles.typeTabBtn, padding: "10px 8px", ...(type === "ingreso" ? styles.typeTabActiveGreen : {}) }}
+                    onClick={() => setType("ingreso")}
+                  >
+                    + Agregar (Ingreso)
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...styles.typeTabBtn, padding: "10px 8px", ...(type === "gasto" ? styles.typeTabActiveRed : {}) }}
                     onClick={() => setType("gasto")}
                   >
-                    - Gasto Personal
+                    - Restar (Gasto)
                   </button>
                 </div>
               </div>
@@ -2527,13 +2927,13 @@
 
               <div>
                 <label style={styles.inputLabel}>Concepto o Descripción</label>
-                <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder="Ej: Compra supermercado, Cena, etc." />
+                <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder={`Ej: ${type === "ingreso" ? "Abono, retiro o vuelto en " + wallet.toLowerCase() : "Compra o pago con " + wallet.toLowerCase()}`} />
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>Monto ($)</label>
-                  <input style={styles.glassInput} type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} required />
+                  <input style={styles.glassInput} type="number" min="1" placeholder="Ej: 15000" value={amount} onChange={e => setAmount(e.target.value)} required />
                 </div>
                 <div>
                   <label style={styles.inputLabel}>Fecha</label>
@@ -2543,7 +2943,9 @@
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
                 <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-                <button type="submit" style={styles.purpleBtn}>{item ? "Guardar Cambios" : "Guardar Personal"}</button>
+                <button type="submit" style={styles.purpleBtn}>
+                  {isEditing ? "Guardar Cambios" : `${type === "ingreso" ? "+ Agregar a " : "- Restar de "}${wallet}`}
+                </button>
               </div>
             </form>
           </div>
@@ -2617,8 +3019,8 @@
       };
 
       return (
-        <div style={styles.authContainer}>
-          <div style={styles.authGlassCard}>
+        <div style={{ ...styles.authContainer, padding: 16 }}>
+          <div style={{ ...styles.authGlassCard, padding: "26px 22px" }}>
             <div style={{ textAlign: "center", marginBottom: 20 }}>
               <div style={styles.authLogo}>
                 <Icon name="boxes" size={24} color="#EDEAE1" />
@@ -2675,7 +3077,7 @@
             {!isRegister && (
               <div style={styles.demoSection}>
                 <span style={{ fontSize: 11, color: "#94A3B8" }}>Accesos rápidos de prueba:</span>
-                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
                   <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("admin@negocio.cl")}>Admin</button>
                   <button type="button" style={{ ...styles.quickDemoBtn, borderColor: "rgba(168,85,247,0.4)" }} onClick={() => setDemo("personal@negocio.cl")}>Personal ✨</button>
                   <button type="button" style={styles.quickDemoBtn} onClick={() => setDemo("ventas@negocio.cl")}>Ventas</button>
@@ -2738,73 +3140,77 @@
           </div>
 
           <div style={styles.panel}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.tableHeaderRow}>
-                  <th style={{ padding: "12px 10px" }}>Nombre</th>
-                  <th>Correo</th>
-                  <th>Rol asignado</th>
-                  <th>Cifrado</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map(u => (
-                  <tr key={u.id} style={styles.tableRow}>
-                    <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{u.name}</td>
-                    <td style={{ color: "#94A3B8" }}>{u.email}</td>
-                    <td>
-                      <span style={u.role === "Personal" ? styles.badgePurple : styles.badgeGreenTag}>
-                        {u.role}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={styles.badgeGray}>
-                        {String(u.pass || "").startsWith("sha256$") ? "🔒 SHA-256" : "⚡ Activo"}
-                      </span>
-                    </td>
-                    <td><span style={{ color: "#34D399", fontSize: 12 }}>● Activo</span></td>
+            <div className="table-scroll">
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeaderRow}>
+                    <th style={{ padding: "12px 10px" }}>Nombre</th>
+                    <th>Correo</th>
+                    <th>Rol asignado</th>
+                    <th>Cifrado</th>
+                    <th>Estado</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.id} style={styles.tableRow}>
+                      <td style={{ padding: 10, fontWeight: 600, color: "#F8FAFC" }}>{u.name}</td>
+                      <td style={{ color: "#94A3B8" }}>{u.email}</td>
+                      <td>
+                        <span style={u.role === "Personal" ? styles.badgePurple : styles.badgeGreenTag}>
+                          {u.role}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={styles.badgeGray}>
+                          {String(u.pass || "").startsWith("sha256$") ? "🔒 SHA-256" : "⚡ Activo"}
+                        </span>
+                      </td>
+                      <td><span style={{ color: "#34D399", fontSize: 12 }}>● Activo</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div style={{ ...styles.panel, marginTop: 16 }}>
             <h3 style={{ ...styles.panelTitle, marginBottom: 10 }}>Matriz de Permisos Configurable por Rol</h3>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.tableHeaderRow}>
-                  <th style={{ padding: 8 }}>Módulo / Permiso</th>
-                  <th>Administrador</th>
-                  <th>Personal</th>
-                  <th>Bodeguero</th>
-                  <th>Vendedor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {permissionRows.map(pr => (
-                  <tr key={pr.key} style={styles.tableRow}>
-                    <td style={{ padding: 8 }}>{pr.label}</td>
-                    {["Administrador", "Personal", "Bodeguero", "Vendedor"].map(rName => (
-                      <td key={rName}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(rolePermissions[rName]?.[pr.key])}
-                          disabled={rName === "Administrador"}
-                          onChange={() => togglePerm(rName, pr.key)}
-                        />
-                      </td>
-                    ))}
+            <div className="table-scroll">
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.tableHeaderRow}>
+                    <th style={{ padding: 8 }}>Módulo / Permiso</th>
+                    <th>Administrador</th>
+                    <th>Personal</th>
+                    <th>Bodeguero</th>
+                    <th>Vendedor</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {permissionRows.map(pr => (
+                    <tr key={pr.key} style={styles.tableRow}>
+                      <td style={{ padding: 8 }}>{pr.label}</td>
+                      {["Administrador", "Personal", "Bodeguero", "Vendedor"].map(rName => (
+                        <td key={rName}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(rolePermissions[rName]?.[pr.key])}
+                            disabled={rName === "Administrador"}
+                            onChange={() => togglePerm(rName, pr.key)}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div style={{ ...styles.panel, marginTop: 16 }}>
             <h3 style={{ ...styles.panelTitle, marginBottom: 10 }}>Bitácora de Auditoría</h3>
-            <div style={{ maxHeight: 200, overflowY: "auto" }}>
+            <div className="table-scroll" style={{ maxHeight: 200, overflowY: "auto" }}>
               <table style={styles.table}>
                 <thead>
                   <tr style={styles.tableHeaderRow}>
@@ -2834,7 +3240,7 @@
 
           {modal && (
             <div style={styles.overlay} onClick={() => setModal(false)}>
-              <div style={styles.glassModal} onClick={e => e.stopPropagation()}>
+              <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
                 <h3 style={styles.modalTitle}>Crear Cuenta de Usuario</h3>
                 <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div>
@@ -2882,6 +3288,73 @@
         overflow: "hidden",
         border: "1px solid rgba(255, 255, 255, 0.1)",
         boxShadow: "0 20px 50px rgba(0, 0, 0, 0.5)"
+      },
+      appContainerMobile: {
+        flexDirection: "column",
+        minHeight: "100dvh",
+        borderRadius: 0,
+        border: "none",
+        boxShadow: "none"
+      },
+      mobileTopBar: {
+        position: "sticky",
+        top: 0,
+        zIndex: 40,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "12px 16px",
+        background: "rgba(10, 15, 26, 0.88)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        borderBottom: "1px solid rgba(255, 255, 255, 0.08)"
+      },
+      mobileBottomNav: {
+        position: "fixed",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 45,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-around",
+        gap: 4,
+        padding: "8px 8px",
+        background: "rgba(10, 15, 26, 0.94)",
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
+        borderTop: "1px solid rgba(255, 255, 255, 0.12)",
+        overflowX: "auto",
+        WebkitOverflowScrolling: "touch"
+      },
+      mobileNavBtn: {
+        background: "transparent",
+        border: "none",
+        borderRadius: 10,
+        padding: "6px 10px",
+        minWidth: 62,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 3,
+        cursor: "pointer",
+        flexShrink: 0
+      },
+      mobileNavBtnActive: {
+        background: "rgba(255, 255, 255, 0.09)",
+        border: "1px solid rgba(255, 255, 255, 0.14)"
+      },
+      mobileNavDotBadge: {
+        position: "absolute",
+        top: -4,
+        right: -8,
+        background: "#EF4444",
+        color: "#FFF",
+        fontSize: 9,
+        fontWeight: 700,
+        padding: "1px 4px",
+        borderRadius: 8
       },
       sidebar: {
         width: 240,
@@ -2967,6 +3440,7 @@
       statusDot: { width: 7, height: 7, borderRadius: "50%", background: "#34D399", boxShadow: "0 0 8px #34D399" },
 
       main: { flex: 1, padding: "28px 34px", overflowY: "auto" },
+      mainMobile: { padding: "16px 14px 96px", overflowX: "hidden" },
       pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 12 },
       eyebrow: { color: "#34D399", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em" },
       pageTitle: { margin: "3px 0 0", fontSize: 22, fontWeight: 700, color: "#F8FAFC" },
@@ -3152,6 +3626,59 @@
       secondaryBtn: { background: "rgba(255, 255, 255, 0.06)", color: "#E2E8F0", border: "1px solid rgba(255, 255, 255, 0.12)", borderRadius: 8, padding: "9px 15px", fontWeight: 500, cursor: "pointer", fontSize: 13 },
       smallGlassBtn: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer" },
       actionIconBtn: { background: "transparent", border: "none", cursor: "pointer", padding: "4px 5px", display: "inline-flex", alignItems: "center" },
+
+      walletBadgeCash: { background: "rgba(16, 185, 129, 0.16)", color: "#6EE7B7", border: "1px solid rgba(52, 211, 153, 0.3)", padding: "2px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 600 },
+      walletBadgeCard: { background: "rgba(56, 189, 248, 0.16)", color: "#7DD3FC", border: "1px solid rgba(56, 189, 248, 0.3)", padding: "2px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 600 },
+      walletPlusBtn: {
+        background: "rgba(16, 185, 129, 0.16)",
+        border: "1px solid rgba(52, 211, 153, 0.35)",
+        color: "#A7F3D0",
+        borderRadius: 8,
+        padding: "9px 10px",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6
+      },
+      walletMinusBtn: {
+        background: "rgba(239, 68, 68, 0.15)",
+        border: "1px solid rgba(248, 113, 113, 0.35)",
+        color: "#FECACA",
+        borderRadius: 8,
+        padding: "9px 10px",
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6
+      },
+      quickActionPlusBtn: {
+        flex: 1,
+        background: "rgba(16, 185, 129, 0.18)",
+        border: "1px solid rgba(52, 211, 153, 0.35)",
+        color: "#6EE7B7",
+        borderRadius: 6,
+        padding: "5px 8px",
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: "pointer"
+      },
+      quickActionMinusBtn: {
+        flex: 1,
+        background: "rgba(239, 68, 68, 0.18)",
+        border: "1px solid rgba(248, 113, 113, 0.35)",
+        color: "#FCA5A5",
+        borderRadius: 6,
+        padding: "5px 8px",
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: "pointer"
+      },
 
       badgeGray: { background: "rgba(255, 255, 255, 0.06)", color: "#94A3B8", padding: "3px 8px", borderRadius: 6, fontSize: 11 },
       badgeGreen: { background: "rgba(16, 185, 129, 0.15)", color: "#34D399", padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 },
