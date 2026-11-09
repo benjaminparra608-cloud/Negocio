@@ -187,6 +187,8 @@
     const AUDIT_STORAGE_KEY = "negocio_audit_log_v2";
     const LOGIN_LOCKS_KEY = "negocio_login_locks_v2";
     const THEME_MODE_KEY = "negocio_warehouse_theme_v2";
+    const SYNC_TRACKER_KEY = "negocio_sync_tracker_v2";
+    const META_SYNC_ID = "__almacen_sync_meta_v2__";
 
     const sanitizeText = (val) => String(val ?? "").replace(/[<>]/g, "").trim();
 
@@ -268,12 +270,12 @@
       if (!item) return "Tarjeta";
       if (item.wallet === "Efectivo" || item.wallet === "Tarjeta") return item.wallet;
       if (item.paymentMethod === "Efectivo") return "Efectivo";
+      const desc = String(item.description || "");
+      if (/^\[Efectivo\]/i.test(desc)) return "Efectivo";
+      if (/^\[Tarjeta\]/i.test(desc)) return "Tarjeta";
       const map = getStoredWalletMap();
       if (item.id && map[item.id]) return map[item.id];
-      const desc = String(item.description || "");
-      if (desc.startsWith("[Efectivo]")) return "Efectivo";
-      if (desc.startsWith("[Tarjeta]")) return "Tarjeta";
-      if (item.id === "pf-2") return "Efectivo";
+      if (item.id === "pf-2" || item.id === "pf-4") return "Efectivo";
       return "Tarjeta";
     };
 
@@ -310,6 +312,187 @@
     const EXPENSE_CATEGORIES = ["Arriendo", "Insumos", "Sueldos", "Servicios", "Marketing", "Transporte", "Otros"];
     const PERSONAL_CATEGORIES = ["Alimentación", "Vivienda", "Transporte", "Servicios Personales", "Salud & Bienestar", "Ocio & Viajes", "Ahorro / Inversión", "Retiro de Ganancias", "Otros Ingresos", "Otros Gastos"];
     const PRODUCT_CATEGORIES = ["Ropa", "Bazar", "Accesorios", "Calzado", "Electrónica", "Hogar", "Alimentos", "Otros"];
+
+    // ============ NORMALIZADORES Y ADAPTADORES MULTIFORMATO SUPABASE ============
+    const getSyncTracker = () => {
+      try {
+        const raw = JSON.parse(localStorage.getItem(SYNC_TRACKER_KEY) || "{}");
+        return {
+          syncedIds: raw.syncedIds || {},
+          deletedIds: raw.deletedIds || {},
+          dirtyIds: raw.dirtyIds || {},
+          initialized: Boolean(raw.initialized),
+          lastSyncAt: raw.lastSyncAt || null
+        };
+      } catch (e) {
+        return { syncedIds: {}, deletedIds: {}, dirtyIds: {}, initialized: false, lastSyncAt: null };
+      }
+    };
+
+    const saveSyncTracker = (updater) => {
+      try {
+        const current = getSyncTracker();
+        const next = typeof updater === "function" ? updater(current) : { ...current, ...updater };
+        localStorage.setItem(SYNC_TRACKER_KEY, JSON.stringify(next));
+        return next;
+      } catch (e) {
+        return getSyncTracker();
+      }
+    };
+
+    const normalizeUser = (r) => ({
+      id: String(r.id || "u-" + Date.now()),
+      name: String(r.name || r.nombre || "Usuario"),
+      email: String(r.email || r.correo || "").toLowerCase(),
+      pass: String(r.pass ?? r.password ?? "123"),
+      role: String(r.role || r.rol || "Vendedor")
+    });
+
+    const normalizeProduct = (r) => {
+      let stockMap = r.stockByLocation ?? r.stockbylocation ?? r.stock_by_location;
+      if (typeof stockMap === "string") {
+        try { stockMap = JSON.parse(stockMap); } catch (e) { stockMap = null; }
+      }
+      if (!stockMap || typeof stockMap !== "object") {
+        stockMap = { "loc-central": 0, "loc-tienda": 0 };
+      }
+      return {
+        id: String(r.id),
+        name: String(r.name || ""),
+        category: String(r.category || "Otros"),
+        sku: String(r.sku || ""),
+        barcode: String(r.barcode ?? r.ean ?? ""),
+        costPrice: Number(r.costPrice ?? r.costprice ?? r.cost_price ?? 0),
+        salePrice: Number(r.salePrice ?? r.saleprice ?? r.sale_price ?? 0),
+        minStock: Number(r.minStock ?? r.minstock ?? r.min_stock ?? 0),
+        stockByLocation: stockMap
+      };
+    };
+
+    const normalizeSale = (r) => ({
+      id: String(r.id),
+      date: String(r.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+      customerName: String(r.customerName ?? r.customername ?? r.customer_name ?? "Consumidor Final"),
+      paymentMethod: String(r.paymentMethod ?? r.paymentmethod ?? r.payment_method ?? "Efectivo"),
+      total: Number(r.total ?? 0),
+      details: String(r.details ?? "")
+    });
+
+    const normalizeExpense = (r) => ({
+      id: String(r.id),
+      date: String(r.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+      category: String(r.category || "Otros"),
+      description: String(r.description || ""),
+      amount: Number(r.amount ?? 0)
+    });
+
+    const normalizeCustomer = (r) => ({
+      id: String(r.id),
+      name: String(r.name || ""),
+      phone: String(r.phone || "")
+    });
+
+    const normalizePersonalFinance = (r) => {
+      const rawDesc = String(r.description || "");
+      let detectedWallet = r.wallet;
+      if (detectedWallet !== "Efectivo" && detectedWallet !== "Tarjeta") {
+        if (/^\[Efectivo\]/i.test(rawDesc)) detectedWallet = "Efectivo";
+        else if (/^\[Tarjeta\]/i.test(rawDesc)) detectedWallet = "Tarjeta";
+        else {
+          const map = getStoredWalletMap();
+          detectedWallet = (r.id && map[r.id]) || (r.id === "pf-2" || r.id === "pf-4" ? "Efectivo" : "Tarjeta");
+        }
+      }
+      const cleanDesc = rawDesc.replace(/^\[(Efectivo|Tarjeta)\]\s*/i, "").trim();
+      if (r.id) saveWalletInMap(r.id, detectedWallet);
+      return {
+        id: String(r.id),
+        date: String(r.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+        type: r.type === "ingreso" ? "ingreso" : "gasto",
+        wallet: detectedWallet,
+        category: String(r.category || "Otros Gastos"),
+        description: cleanDesc,
+        amount: Number(r.amount ?? 0)
+      };
+    };
+
+    async function upsertProductToSupabase(prod) {
+      if (!supabase) return { error: null };
+      const clean = normalizeProduct(prod);
+      let res = await supabase.from("productos").upsert([clean]);
+      if (!res.error) return res;
+
+      const { barcode, ...noBarcode } = clean;
+      res = await supabase.from("productos").upsert([noBarcode]);
+      if (!res.error) return res;
+
+      const lower = {
+        id: clean.id, name: clean.name, category: clean.category, sku: clean.sku, barcode: clean.barcode,
+        costprice: clean.costPrice, saleprice: clean.salePrice, minstock: clean.minStock, stockbylocation: clean.stockByLocation
+      };
+      res = await supabase.from("productos").upsert([lower]);
+      if (!res.error) return res;
+
+      const { barcode: _b2, ...lowerNoBarcode } = lower;
+      res = await supabase.from("productos").upsert([lowerNoBarcode]);
+      if (!res.error) return res;
+
+      const snake = {
+        id: clean.id, name: clean.name, category: clean.category, sku: clean.sku, barcode: clean.barcode,
+        cost_price: clean.costPrice, sale_price: clean.salePrice, min_stock: clean.minStock, stock_by_location: clean.stockByLocation
+      };
+      res = await supabase.from("productos").upsert([snake]);
+      if (!res.error) return res;
+
+      const { barcode: _b3, ...snakeNoBarcode } = snake;
+      return await supabase.from("productos").upsert([snakeNoBarcode]);
+    }
+
+    async function upsertSaleToSupabase(sale) {
+      if (!supabase) return { error: null };
+      const clean = normalizeSale(sale);
+      let res = await supabase.from("ventas").upsert([clean]);
+      if (!res.error) return res;
+
+      const lower = {
+        id: clean.id, date: clean.date, customername: clean.customerName,
+        paymentmethod: clean.paymentMethod, total: clean.total, details: clean.details
+      };
+      res = await supabase.from("ventas").upsert([lower]);
+      if (!res.error) return res;
+
+      const snake = {
+        id: clean.id, date: clean.date, customer_name: clean.customerName,
+        payment_method: clean.paymentMethod, total: clean.total, details: clean.details
+      };
+      return await supabase.from("ventas").upsert([snake]);
+    }
+
+    async function upsertPersonalFinanceToSupabase(item) {
+      if (!supabase) return { error: null };
+      const clean = normalizePersonalFinance(item);
+      const res = await supabase.from("finanzas_personales").upsert([clean]);
+      if (!res.error) return res;
+
+      const { wallet, ...fallback } = clean;
+      const prefixedDesc = `[${wallet || "Tarjeta"}] ${clean.description || ""}`.trim();
+      return await supabase.from("finanzas_personales").upsert([{ ...fallback, description: prefixedDesc }]);
+    }
+
+    async function upsertExpenseToSupabase(exp) {
+      if (!supabase) return { error: null };
+      return await supabase.from("gastos").upsert([normalizeExpense(exp)]);
+    }
+
+    async function upsertCustomerToSupabase(cust) {
+      if (!supabase) return { error: null };
+      return await supabase.from("clientes").upsert([normalizeCustomer(cust)]);
+    }
+
+    async function upsertUserToSupabase(user) {
+      if (!supabase) return { error: null };
+      return await supabase.from("usuarios").upsert([normalizeUser(user)]);
+    }
 
     const money = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
     const getProductTotalStock = (p) => Object.values(p.stockByLocation || {}).reduce((a, b) => a + (Number(b) || 0), 0);
@@ -367,12 +550,12 @@
         }
       }, []);
 
-      const [users, setUsers] = useState(cachedData?.users || initialUsers);
-      const [products, setProducts] = useState(cachedData?.products || initialMockProducts);
-      const [sales, setSales] = useState(cachedData?.sales || initialMockSales);
-      const [expenses, setExpenses] = useState(cachedData?.expenses || initialMockExpenses);
-      const [customers, setCustomers] = useState(cachedData?.customers || initialMockCustomers);
-      const [personalFinances, setPersonalFinances] = useState(cachedData?.personalFinances || initialPersonalFinances);
+      const [users, setUsers] = useState(() => (cachedData?.users || initialUsers).map(normalizeUser));
+      const [products, setProducts] = useState(() => (cachedData?.products || initialMockProducts).map(normalizeProduct));
+      const [sales, setSales] = useState(() => (cachedData?.sales || initialMockSales).map(normalizeSale));
+      const [expenses, setExpenses] = useState(() => (cachedData?.expenses || initialMockExpenses).filter(e => e.id !== META_SYNC_ID).map(normalizeExpense));
+      const [customers, setCustomers] = useState(() => (cachedData?.customers || initialMockCustomers).filter(c => c.id !== META_SYNC_ID).map(normalizeCustomer));
+      const [personalFinances, setPersonalFinances] = useState(() => (cachedData?.personalFinances || initialPersonalFinances).map(normalizePersonalFinance));
 
       const [rolePermissions, setRolePermissions] = useState(() => {
         try {
@@ -396,11 +579,18 @@
       const [tab, setTab] = useState("dashboard");
       const [locations] = useState(defaultLocations);
       const [isSyncing, setIsSyncing] = useState(false);
+      const [syncStatus, setSyncStatus] = useState({ state: "idle", lastSync: null, error: null, tableStatus: {} });
+      const [syncModalOpen, setSyncModalOpen] = useState(false);
       const [salesMonthFilter, setSalesMonthFilter] = useState("");
       const [inventorySearch, setInventorySearch] = useState("");
       const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState("Todas");
       const [toast, setToast] = useState(null);
       const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth <= 860 : false);
+
+      const stateRef = useRef({ users, products, sales, expenses, customers, personalFinances, rolePermissions });
+      useEffect(() => {
+        stateRef.current = { users, products, sales, expenses, customers, personalFinances, rolePermissions };
+      }, [users, products, sales, expenses, customers, personalFinances, rolePermissions]);
 
       useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 860);
@@ -454,34 +644,331 @@
         try { localStorage.setItem(PERMS_STORAGE_KEY, JSON.stringify(rolePermissions)); } catch (e) {}
       }, [rolePermissions]);
 
-      const fetchDataFromSupabase = useCallback(async () => {
+      // Guarda un espejo compacto del estado completo en una fila de sistema para respaldar columnas/tablas faltantes y permisos
+      const saveCloudSnapshot = useCallback(async (overrideState = {}) => {
+        if (!supabase) return;
+        try {
+          const tracker = getSyncTracker();
+          const current = { ...stateRef.current, ...overrideState };
+          const payload = {
+            updatedAt: Date.now(),
+            deletedIds: tracker.deletedIds || {},
+            rolePermissions: current.rolePermissions,
+            products: (current.products || []).map(normalizeProduct),
+            sales: (current.sales || []).map(normalizeSale),
+            expenses: (current.expenses || []).filter(e => e.id !== META_SYNC_ID).map(normalizeExpense),
+            customers: (current.customers || []).filter(c => c.id !== META_SYNC_ID).map(normalizeCustomer),
+            personalFinances: (current.personalFinances || []).map(normalizePersonalFinance),
+            users: (current.users || []).map(normalizeUser)
+          };
+          const serialized = JSON.stringify(payload);
+          const cRes = await supabase.from("clientes").upsert([{ id: META_SYNC_ID, name: "__sync_v2__", phone: serialized }]);
+          if (cRes.error) {
+            await supabase.from("gastos").upsert([{ id: META_SYNC_ID, date: "1970-01-01", category: "__sync_v2__", description: serialized, amount: 0 }]);
+          }
+        } catch (e) {}
+      }, []);
+
+      // Subida completa de todos los datos locales de este PC hacia Supabase
+      const pushAllLocalDataToSupabase = useCallback(async (silent = false) => {
+        if (!supabase) return false;
+        setIsSyncing(true);
+        try {
+          const current = stateRef.current;
+          const results = await Promise.all([
+            Promise.all((current.users || []).map(u => upsertUserToSupabase(u))),
+            Promise.all((current.products || []).map(p => upsertProductToSupabase(p))),
+            Promise.all((current.sales || []).map(s => upsertSaleToSupabase(s))),
+            Promise.all((current.expenses || []).filter(e => e.id !== META_SYNC_ID).map(e => upsertExpenseToSupabase(e))),
+            Promise.all((current.customers || []).filter(c => c.id !== META_SYNC_ID).map(c => upsertCustomerToSupabase(c))),
+            Promise.all((current.personalFinances || []).map(pf => upsertPersonalFinanceToSupabase(pf)))
+          ]);
+
+          await saveCloudSnapshot(current);
+
+          const allIds = {};
+          [
+            ...(current.users || []),
+            ...(current.products || []),
+            ...(current.sales || []),
+            ...(current.expenses || []),
+            ...(current.customers || []),
+            ...(current.personalFinances || [])
+          ].forEach(item => { if (item?.id) allIds[item.id] = true; });
+
+          const nowStr = new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          saveSyncTracker(prev => ({
+            ...prev,
+            syncedIds: { ...(prev.syncedIds || {}), ...allIds },
+            dirtyIds: {},
+            initialized: true,
+            lastSyncAt: nowStr
+          }));
+
+          const firstErr = results.flat().find(r => r && r.error)?.error;
+          setSyncStatus(prev => ({
+            ...prev,
+            state: firstErr ? "warn" : "ok",
+            lastSync: nowStr,
+            error: firstErr ? (firstErr.message || String(firstErr)) : null
+          }));
+
+          if (!silent) {
+            notify("Datos de este dispositivo subidos a la nube correctamente ☁️");
+          }
+          return !firstErr;
+        } catch (err) {
+          if (!silent) notify("Error al subir datos a la nube", "warn");
+          return false;
+        } finally {
+          setIsSyncing(false);
+        }
+      }, [notify, saveCloudSnapshot]);
+
+      const fetchDataFromSupabase = useCallback(async (silent = false, forcePullOnly = false) => {
         if (!supabase) return;
         setIsSyncing(true);
         try {
           const [uRes, pRes, sRes, eRes, cRes, pfRes] = await Promise.all([
             supabase.from("usuarios").select("*"),
             supabase.from("productos").select("*"),
-            supabase.from("ventas").select("*").order("date", { ascending: false }),
-            supabase.from("gastos").select("*").order("date", { ascending: false }),
+            supabase.from("ventas").select("*"),
+            supabase.from("gastos").select("*"),
             supabase.from("clientes").select("*"),
-            supabase.from("finanzas_personales").select("*").order("date", { ascending: false })
+            supabase.from("finanzas_personales").select("*")
           ]);
 
-          if (uRes.data && uRes.data.length > 0) setUsers(uRes.data);
-          if (pRes.data && pRes.data.length > 0) setProducts(pRes.data);
-          if (sRes.data) setSales(sRes.data);
-          if (eRes.data) setExpenses(eRes.data);
-          if (cRes.data) setCustomers(cRes.data);
-          if (pfRes.data) setPersonalFinances(pfRes.data);
+          const tableStatus = {
+            usuarios: uRes.error ? uRes.error.message : `OK (${(uRes.data || []).length})`,
+            productos: pRes.error ? pRes.error.message : `OK (${(pRes.data || []).length})`,
+            ventas: sRes.error ? sRes.error.message : `OK (${(sRes.data || []).length})`,
+            gastos: eRes.error ? eRes.error.message : `OK (${(eRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`,
+            clientes: cRes.error ? cRes.error.message : `OK (${(cRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`,
+            finanzas_personales: pfRes.error ? pfRes.error.message : `OK (${(pfRes.data || []).length})`
+          };
+
+          // Buscar fila de espejo global (__almacen_sync_meta_v2__) en clientes o gastos
+          let cloudMeta = null;
+          const metaRowCust = (cRes.data || []).find(r => r.id === META_SYNC_ID);
+          const metaRowExp = (eRes.data || []).find(r => r.id === META_SYNC_ID);
+          const rawMetaStr = metaRowCust?.phone || metaRowExp?.description;
+          if (rawMetaStr) {
+            try { cloudMeta = JSON.parse(rawMetaStr); } catch (e) {}
+          }
+
+          const tracker = getSyncTracker();
+          const mergedDeletedIds = { ...(tracker.deletedIds || {}), ...(cloudMeta?.deletedIds || {}) };
+          const dirtyIds = forcePullOnly ? {} : (tracker.dirtyIds || {});
+
+          const mergeCollection = (remoteRaw, metaFallbackList, localList, initialMockList, normalizer, sortByDate = false) => {
+            const hasRemoteTable = Array.isArray(remoteRaw);
+            const remoteNormalized = hasRemoteTable
+              ? remoteRaw.filter(r => r && r.id !== META_SYNC_ID).map(normalizer)
+              : [];
+            const metaNormalized = Array.isArray(metaFallbackList)
+              ? metaFallbackList.filter(r => r && r.id !== META_SYNC_ID).map(normalizer)
+              : [];
+
+            const metaById = new Map(metaNormalized.map(item => [item.id, item]));
+            const remoteById = new Map();
+
+            // Combinar filas de la tabla con metadatos del espejo (para recuperar campos como barcode, wallet o stockByLocation si faltaban columnas)
+            remoteNormalized.forEach(item => {
+              const fromMeta = metaById.get(item.id);
+              remoteById.set(item.id, fromMeta ? { ...fromMeta, ...item, barcode: item.barcode || fromMeta.barcode || "", wallet: item.wallet || fromMeta.wallet } : item);
+            });
+
+            // Si la tabla individual falló o está vacía pero el espejo tiene datos, usar los del espejo
+            if (remoteById.size === 0 && metaById.size > 0) {
+              metaById.forEach((val, key) => remoteById.set(key, val));
+            }
+
+            const initialById = new Map((initialMockList || []).map(i => [i.id, normalizer(i)]));
+            const resultById = new Map();
+            const toUpload = [];
+
+            remoteById.forEach((item, id) => {
+              if (!mergedDeletedIds[id]) {
+                resultById.set(id, item);
+              }
+            });
+
+            if (!forcePullOnly) {
+              (localList || []).forEach(rawLocal => {
+                if (!rawLocal || rawLocal.id === META_SYNC_ID) return;
+                const localItem = normalizer(rawLocal);
+                const id = localItem.id;
+                if (mergedDeletedIds[id]) return;
+
+                if (dirtyIds[id]) {
+                  resultById.set(id, localItem);
+                  toUpload.push(localItem);
+                  return;
+                }
+
+                if (!remoteById.has(id)) {
+                  const wasAlreadySynced = Boolean(tracker.syncedIds?.[id]);
+                  if (wasAlreadySynced) {
+                    // Fue eliminado en otro dispositivo
+                    return;
+                  }
+                  const initItem = initialById.get(id);
+                  const isUntouchedMock = initItem && JSON.stringify(initItem) === JSON.stringify(localItem);
+                  if (!isUntouchedMock || remoteById.size === 0) {
+                    resultById.set(id, localItem);
+                    toUpload.push(localItem);
+                  }
+                }
+              });
+            }
+
+            let finalArr = Array.from(resultById.values());
+            if (finalArr.length === 0 && remoteById.size === 0 && Object.keys(mergedDeletedIds).length === 0) {
+              finalArr = (localList && localList.length > 0 ? localList : initialMockList).map(normalizer);
+              finalArr.forEach(item => toUpload.push(item));
+            }
+
+            if (sortByDate) {
+              finalArr.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+            }
+            return { list: finalArr, toUpload };
+          };
+
+          const current = stateRef.current;
+          const uMerged = mergeCollection(uRes.data, cloudMeta?.users, current.users, initialUsers, normalizeUser, false);
+          // Garantizar que los usuarios base siempre existan para poder iniciar sesión
+          const userMap = new Map(uMerged.list.map(u => [u.email.toLowerCase(), u]));
+          initialUsers.forEach(iu => {
+            if (!userMap.has(iu.email.toLowerCase())) {
+              const normU = normalizeUser(iu);
+              uMerged.list.push(normU);
+              uMerged.toUpload.push(normU);
+            }
+          });
+
+          const pMerged = mergeCollection(pRes.data, cloudMeta?.products, current.products, initialMockProducts, normalizeProduct, false);
+          const sMerged = mergeCollection(sRes.data, cloudMeta?.sales, current.sales, initialMockSales, normalizeSale, true);
+          const eMerged = mergeCollection(eRes.data, cloudMeta?.expenses, current.expenses, initialMockExpenses, normalizeExpense, true);
+          const cMerged = mergeCollection(cRes.data, cloudMeta?.customers, current.customers, initialMockCustomers, normalizeCustomer, false);
+          const pfMerged = mergeCollection(pfRes.data, cloudMeta?.personalFinances, current.personalFinances, initialPersonalFinances, normalizePersonalFinance, true);
+
+          setUsers(uMerged.list);
+          setProducts(pMerged.list);
+          setSales(sMerged.list);
+          setExpenses(eMerged.list);
+          setCustomers(cMerged.list);
+          setPersonalFinances(pfMerged.list);
+
+          if (cloudMeta?.rolePermissions) {
+            setRolePermissions(prev => ({ ...defaultRolePermissions, ...prev, ...cloudMeta.rolePermissions }));
+          }
+
+          // Marcar todos los IDs actuales como sincronizados
+          const newSyncedIds = { ...(tracker.syncedIds || {}) };
+          [
+            ...uMerged.list, ...pMerged.list, ...sMerged.list,
+            ...eMerged.list, ...cMerged.list, ...pfMerged.list
+          ].forEach(item => { if (item?.id) newSyncedIds[item.id] = true; });
+
+          const nowStr = new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          saveSyncTracker({
+            syncedIds: newSyncedIds,
+            deletedIds: mergedDeletedIds,
+            dirtyIds: {},
+            initialized: true,
+            lastSyncAt: nowStr
+          });
+
+          // Si había cambios locales pendientes o datos en este PC que aún no estaban en Supabase, subirlos automáticamente
+          const totalToUpload =
+            uMerged.toUpload.length + pMerged.toUpload.length + sMerged.toUpload.length +
+            eMerged.toUpload.length + cMerged.toUpload.length + pfMerged.toUpload.length;
+
+          if (totalToUpload > 0 && !forcePullOnly) {
+            await Promise.all([
+              ...uMerged.toUpload.map(u => upsertUserToSupabase(u)),
+              ...pMerged.toUpload.map(p => upsertProductToSupabase(p)),
+              ...sMerged.toUpload.map(s => upsertSaleToSupabase(s)),
+              ...eMerged.toUpload.map(e => upsertExpenseToSupabase(e)),
+              ...cMerged.toUpload.map(c => upsertCustomerToSupabase(c)),
+              ...pfMerged.toUpload.map(pf => upsertPersonalFinanceToSupabase(pf))
+            ]);
+            await saveCloudSnapshot({
+              users: uMerged.list,
+              products: pMerged.list,
+              sales: sMerged.list,
+              expenses: eMerged.list,
+              customers: cMerged.list,
+              personalFinances: pfMerged.list,
+              rolePermissions: cloudMeta?.rolePermissions || current.rolePermissions
+            });
+          }
+
+          const anyError = uRes.error || pRes.error || sRes.error || eRes.error || cRes.error || pfRes.error;
+          const allFailed = uRes.error && pRes.error && sRes.error && eRes.error && cRes.error && pfRes.error;
+
+          setSyncStatus({
+            state: allFailed ? "error" : anyError ? "warn" : "ok",
+            lastSync: nowStr,
+            error: anyError ? (anyError.message || String(anyError)) : null,
+            tableStatus
+          });
+
+          if (!silent && forcePullOnly) {
+            notify("Datos actualizados desde la nube ☁️");
+          }
         } catch (err) {
           console.error("Error al sincronizar con Supabase:", err);
+          setSyncStatus(prev => ({
+            ...prev,
+            state: "error",
+            error: err?.message || "No se pudo conectar con Supabase"
+          }));
         } finally {
           setIsSyncing(false);
         }
-      }, []);
+      }, [notify, saveCloudSnapshot]);
 
+      // Sincronización inicial, Realtime multi-dispositivo, foco de pestaña e intervalo automático
       useEffect(() => {
-        fetchDataFromSupabase();
+        fetchDataFromSupabase(true);
+        if (!supabase) return;
+
+        let realtimeChannel = null;
+        try {
+          realtimeChannel = supabase
+            .channel("almacen-multi-device-sync")
+            .on("postgres_changes", { event: "*", schema: "public" }, () => {
+              fetchDataFromSupabase(true);
+            })
+            .subscribe();
+        } catch (e) {}
+
+        const handleFocusOrOnline = () => {
+          if (document.visibilityState === "visible") {
+            fetchDataFromSupabase(true);
+          }
+        };
+
+        window.addEventListener("focus", handleFocusOrOnline);
+        window.addEventListener("online", handleFocusOrOnline);
+        document.addEventListener("visibilitychange", handleFocusOrOnline);
+
+        const intervalId = setInterval(() => {
+          if (document.visibilityState === "visible") {
+            fetchDataFromSupabase(true);
+          }
+        }, 15000);
+
+        return () => {
+          clearInterval(intervalId);
+          window.removeEventListener("focus", handleFocusOrOnline);
+          window.removeEventListener("online", handleFocusOrOnline);
+          document.removeEventListener("visibilitychange", handleFocusOrOnline);
+          if (realtimeChannel) {
+            try { supabase.removeChannel(realtimeChannel); } catch (e) {}
+          }
+        };
       }, [fetchDataFromSupabase]);
 
       useEffect(() => {
@@ -549,11 +1036,44 @@
         });
       }, [products, inventorySearch, inventoryCategoryFilter]);
 
+      const markDirtyId = (id) => {
+        saveSyncTracker(prev => ({
+          ...prev,
+          dirtyIds: { ...(prev.dirtyIds || {}), [id]: true }
+        }));
+      };
+
+      const markSyncedId = (id) => {
+        saveSyncTracker(prev => {
+          const nextDirty = { ...(prev.dirtyIds || {}) };
+          delete nextDirty[id];
+          return {
+            ...prev,
+            syncedIds: { ...(prev.syncedIds || {}), [id]: true },
+            dirtyIds: nextDirty,
+            lastSyncAt: new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+          };
+        });
+      };
+
+      const markDeletedId = (id) => {
+        saveSyncTracker(prev => {
+          const nextDirty = { ...(prev.dirtyIds || {}) };
+          delete nextDirty[id];
+          return {
+            ...prev,
+            deletedIds: { ...(prev.deletedIds || {}), [id]: true },
+            dirtyIds: nextDirty
+          };
+        });
+      };
+
       const handleLogin = (userObj) => {
         setCurrentUser(userObj);
         setTab("dashboard");
         registerAudit("Inicio de Sesión", `Ingreso con rol ${userObj.role}`, userObj.name);
         notify(`Bienvenido, ${userObj.name}`);
+        fetchDataFromSupabase(true);
       };
 
       const handleLogout = () => {
@@ -562,42 +1082,56 @@
       };
 
       const handleRegister = async (newUser) => {
-        setUsers(prev => [...prev, newUser]);
-        setCurrentUser(newUser);
-        registerAudit("Registro de Usuario", `${newUser.email} (${newUser.role})`, newUser.name);
+        const cleanU = normalizeUser(newUser);
+        markDirtyId(cleanU.id);
+        const nextUsers = [...users, cleanU];
+        setUsers(nextUsers);
+        setCurrentUser(cleanU);
+        registerAudit("Registro de Usuario", `${cleanU.email} (${cleanU.role})`, cleanU.name);
         if (supabase) {
-          await supabase.from("usuarios").insert([newUser]);
+          const { error } = await upsertUserToSupabase(cleanU);
+          if (!error) markSyncedId(cleanU.id);
+          await saveCloudSnapshot({ users: nextUsers });
         }
       };
 
       const handleSaveProduct = async (productData) => {
         let updatedEntry;
+        let nextProducts;
         if (productModalState === "new") {
-          updatedEntry = { ...productData, id: "p-" + Date.now() };
-          setProducts(prev => [updatedEntry, ...prev]);
+          updatedEntry = normalizeProduct({ ...productData, id: "p-" + Date.now() });
+          nextProducts = [updatedEntry, ...products];
+          setProducts(nextProducts);
           registerAudit("Producto Creado", `${updatedEntry.name} (${updatedEntry.sku})`);
-          notify("Producto agregado al almacén");
+          notify("Producto agregado y sincronizando ☁️");
         } else {
-          updatedEntry = { ...productData, id: productModalState.id };
-          setProducts(prev => prev.map(p => p.id === productModalState.id ? updatedEntry : p));
+          updatedEntry = normalizeProduct({ ...productData, id: productModalState.id });
+          nextProducts = products.map(p => p.id === productModalState.id ? updatedEntry : p);
+          setProducts(nextProducts);
           registerAudit("Producto Modificado", `${updatedEntry.name} (${updatedEntry.sku})`);
-          notify("Ficha de producto actualizada");
+          notify("Ficha de producto actualizada ☁️");
         }
+        markDirtyId(updatedEntry.id);
         setProductModalState(null);
 
         if (supabase) {
-          await supabase.from("productos").upsert([updatedEntry]);
+          const { error } = await upsertProductToSupabase(updatedEntry);
+          if (!error) markSyncedId(updatedEntry.id);
+          await saveCloudSnapshot({ products: nextProducts });
         }
       };
 
       const handleDeleteProduct = async (productId) => {
         if (confirm("¿Estás seguro de eliminar este producto del inventario?")) {
           const target = products.find(p => p.id === productId);
-          setProducts(prev => prev.filter(p => p.id !== productId));
+          const nextProducts = products.filter(p => p.id !== productId);
+          markDeletedId(productId);
+          setProducts(nextProducts);
           registerAudit("Producto Eliminado", target?.name || productId);
           notify("Producto eliminado", "warn");
           if (supabase) {
             await supabase.from("productos").delete().eq("id", productId);
+            await saveCloudSnapshot({ products: nextProducts });
           }
         }
       };
@@ -610,176 +1144,218 @@
           notify("Stock insuficiente en la bodega de origen", "warn");
           return;
         }
-        const updatedProduct = {
+        const updatedProduct = normalizeProduct({
           ...prod,
           stockByLocation: {
             ...(prod.stockByLocation || {}),
             [fromLocId]: currentFrom - qty,
             [toLocId]: Number(prod.stockByLocation?.[toLocId] || 0) + qty
           }
-        };
-        setProducts(prev => prev.map(p => p.id === productId ? updatedProduct : p));
+        });
+        const nextProducts = products.map(p => p.id === productId ? updatedProduct : p);
+        markDirtyId(updatedProduct.id);
+        setProducts(nextProducts);
         registerAudit("Traspaso de Bodega", `${qty} un. de ${prod.name}`);
-        notify(`Traspaso de ${qty} un. completado`);
+        notify(`Traspaso de ${qty} un. sincronizado ☁️`);
         setTransferModalOpen(false);
         if (supabase) {
-          await supabase.from("productos").upsert([updatedProduct]);
+          const { error } = await upsertProductToSupabase(updatedProduct);
+          if (!error) markSyncedId(updatedProduct.id);
+          await saveCloudSnapshot({ products: nextProducts });
         }
       };
 
       const ensureCustomerExists = async (name) => {
         const trimmed = sanitizeText(name);
-        if (!trimmed) return;
+        if (!trimmed) return customers;
         const exists = customers.some(c => (c.name || "").toLowerCase() === trimmed.toLowerCase());
-        if (exists) return;
+        if (exists) return customers;
 
-        const newCustomer = { id: "c-" + Date.now(), name: trimmed, phone: "" };
-        setCustomers(prev => [...prev, newCustomer]);
+        const newCustomer = normalizeCustomer({ id: "c-" + Date.now(), name: trimmed, phone: "" });
+        markDirtyId(newCustomer.id);
+        const nextCustomers = [...customers, newCustomer];
+        setCustomers(nextCustomers);
         if (supabase) {
-          await supabase.from("clientes").insert([newCustomer]);
+          const { error } = await upsertCustomerToSupabase(newCustomer);
+          if (!error) markSyncedId(newCustomer.id);
         }
+        return nextCustomers;
       };
 
       const handleSaveSale = async (saleData, stockDeduction) => {
         let updatedEntry;
+        let nextSales;
         if (saleModalState === "new") {
-          updatedEntry = { ...saleData, id: "s-" + Date.now() };
-          setSales(prev => [updatedEntry, ...prev]);
+          updatedEntry = normalizeSale({ ...saleData, id: "s-" + Date.now() });
+          nextSales = [updatedEntry, ...sales];
+          setSales(nextSales);
           registerAudit("Venta Registrada", `${money(updatedEntry.total)} - ${updatedEntry.customerName}`);
-          notify("Venta registrada en caja");
+          notify("Venta registrada y sincronizada ☁️");
         } else {
-          updatedEntry = { ...saleData, id: saleModalState.id };
-          setSales(prev => prev.map(s => s.id === saleModalState.id ? updatedEntry : s));
+          updatedEntry = normalizeSale({ ...saleData, id: saleModalState.id });
+          nextSales = sales.map(s => s.id === saleModalState.id ? updatedEntry : s);
+          setSales(nextSales);
           registerAudit("Venta Modificada", `${money(updatedEntry.total)} - ${updatedEntry.customerName}`);
-          notify("Venta modificada");
+          notify("Venta modificada ☁️");
         }
+        markDirtyId(updatedEntry.id);
 
+        let nextProducts = products;
         if (stockDeduction && stockDeduction.productId && stockDeduction.qty > 0) {
           const targetProd = products.find(p => p.id === stockDeduction.productId);
           if (targetProd) {
             const locId = stockDeduction.locationId || "loc-tienda";
             const currentLocStock = Number(targetProd.stockByLocation?.[locId] || 0);
-            const updatedProd = {
+            const updatedProd = normalizeProduct({
               ...targetProd,
               stockByLocation: {
                 ...(targetProd.stockByLocation || {}),
                 [locId]: Math.max(0, currentLocStock - stockDeduction.qty)
               }
-            };
-            setProducts(prev => prev.map(p => p.id === targetProd.id ? updatedProd : p));
+            });
+            markDirtyId(updatedProd.id);
+            nextProducts = products.map(p => p.id === targetProd.id ? updatedProd : p);
+            setProducts(nextProducts);
             if (supabase) {
-              await supabase.from("productos").upsert([updatedProd]);
+              const { error } = await upsertProductToSupabase(updatedProd);
+              if (!error) markSyncedId(updatedProd.id);
             }
           }
         }
 
-        ensureCustomerExists(saleData.customerName);
+        const nextCustomers = await ensureCustomerExists(saleData.customerName);
         setSaleModalState(null);
 
         if (supabase) {
-          await supabase.from("ventas").upsert([updatedEntry]);
+          const { error } = await upsertSaleToSupabase(updatedEntry);
+          if (!error) markSyncedId(updatedEntry.id);
+          await saveCloudSnapshot({ sales: nextSales, products: nextProducts, customers: nextCustomers });
         }
       };
 
       const handleDeleteSale = async (saleId) => {
         if (confirm("¿Estás seguro de eliminar esta venta del registro?")) {
-          setSales(prev => prev.filter(s => s.id !== saleId));
+          const nextSales = sales.filter(s => s.id !== saleId);
+          markDeletedId(saleId);
+          setSales(nextSales);
           registerAudit("Venta Eliminada", saleId);
           notify("Venta eliminada", "warn");
           if (supabase) {
             await supabase.from("ventas").delete().eq("id", saleId);
+            await saveCloudSnapshot({ sales: nextSales });
           }
         }
       };
 
       const handleSaveExpense = async (expenseData) => {
         let updatedEntry;
+        let nextExpenses;
         if (expenseModalState === "new") {
-          updatedEntry = { ...expenseData, id: "e-" + Date.now() };
-          setExpenses(prev => [updatedEntry, ...prev]);
+          updatedEntry = normalizeExpense({ ...expenseData, id: "e-" + Date.now() });
+          nextExpenses = [updatedEntry, ...expenses];
+          setExpenses(nextExpenses);
           registerAudit("Gasto Registrado", `${updatedEntry.category}: ${money(updatedEntry.amount)}`);
-          notify("Gasto registrado");
+          notify("Gasto registrado ☁️");
         } else {
-          updatedEntry = { ...expenseData, id: expenseModalState.id };
-          setExpenses(prev => prev.map(e => e.id === expenseModalState.id ? updatedEntry : e));
-          notify("Gasto actualizado");
+          updatedEntry = normalizeExpense({ ...expenseData, id: expenseModalState.id });
+          nextExpenses = expenses.map(e => e.id === expenseModalState.id ? updatedEntry : e);
+          setExpenses(nextExpenses);
+          notify("Gasto actualizado ☁️");
         }
+        markDirtyId(updatedEntry.id);
         setExpenseModalState(null);
 
         if (supabase) {
-          await supabase.from("gastos").upsert([updatedEntry]);
+          const { error } = await upsertExpenseToSupabase(updatedEntry);
+          if (!error) markSyncedId(updatedEntry.id);
+          await saveCloudSnapshot({ expenses: nextExpenses });
         }
       };
 
       const handleDeleteExpense = async (expenseId) => {
         if (confirm("¿Estás seguro de eliminar este gasto del registro?")) {
-          setExpenses(prev => prev.filter(e => e.id !== expenseId));
+          const nextExpenses = expenses.filter(e => e.id !== expenseId);
+          markDeletedId(expenseId);
+          setExpenses(nextExpenses);
           notify("Gasto eliminado", "warn");
           if (supabase) {
             await supabase.from("gastos").delete().eq("id", expenseId);
+            await saveCloudSnapshot({ expenses: nextExpenses });
           }
         }
       };
 
       const handleSaveCustomer = async (customerData) => {
         let updatedEntry;
+        let nextCustomers;
         if (customerModalState === "new") {
-          updatedEntry = { ...customerData, id: "c-" + Date.now() };
-          setCustomers(prev => [updatedEntry, ...prev]);
-          notify("Cliente guardado");
+          updatedEntry = normalizeCustomer({ ...customerData, id: "c-" + Date.now() });
+          nextCustomers = [updatedEntry, ...customers];
+          setCustomers(nextCustomers);
+          notify("Cliente guardado ☁️");
         } else {
-          updatedEntry = { ...customerData, id: customerModalState.id };
-          setCustomers(prev => prev.map(c => c.id === customerModalState.id ? updatedEntry : c));
-          notify("Cliente actualizado");
+          updatedEntry = normalizeCustomer({ ...customerData, id: customerModalState.id });
+          nextCustomers = customers.map(c => c.id === customerModalState.id ? updatedEntry : c);
+          setCustomers(nextCustomers);
+          notify("Cliente actualizado ☁️");
         }
+        markDirtyId(updatedEntry.id);
         setCustomerModalState(null);
 
         if (supabase) {
-          await supabase.from("clientes").upsert([updatedEntry]);
+          const { error } = await upsertCustomerToSupabase(updatedEntry);
+          if (!error) markSyncedId(updatedEntry.id);
+          await saveCloudSnapshot({ customers: nextCustomers });
         }
       };
 
       const handleDeleteCustomer = async (customerId) => {
         if (confirm("¿Estás seguro de eliminar este cliente del registro?")) {
-          setCustomers(prev => prev.filter(c => c.id !== customerId));
+          const nextCustomers = customers.filter(c => c.id !== customerId);
+          markDeletedId(customerId);
+          setCustomers(nextCustomers);
           notify("Cliente eliminado", "warn");
           if (supabase) {
             await supabase.from("clientes").delete().eq("id", customerId);
+            await saveCloudSnapshot({ customers: nextCustomers });
           }
         }
       };
 
       const handleSavePersonalFinance = async (itemData) => {
         let updatedEntry;
+        let nextPF;
         const isCreating = personalModalState === "new" || Boolean(personalModalState?.isPreset);
         if (isCreating) {
-          updatedEntry = { ...itemData, id: "pf-" + Date.now() };
-          saveWalletInMap(updatedEntry.id, updatedEntry.wallet || "Tarjeta");
-          setPersonalFinances(prev => [updatedEntry, ...prev]);
-          notify(`Movimiento en ${updatedEntry.wallet || "Tarjeta"} guardado`);
+          updatedEntry = normalizePersonalFinance({ ...itemData, id: "pf-" + Date.now() });
+          nextPF = [updatedEntry, ...personalFinances];
+          setPersonalFinances(nextPF);
+          notify(`Movimiento en ${updatedEntry.wallet || "Tarjeta"} sincronizado ☁️`);
         } else {
-          updatedEntry = { ...itemData, id: personalModalState.id };
-          saveWalletInMap(updatedEntry.id, updatedEntry.wallet || "Tarjeta");
-          setPersonalFinances(prev => prev.map(item => item.id === personalModalState.id ? updatedEntry : item));
-          notify("Movimiento personal actualizado");
+          updatedEntry = normalizePersonalFinance({ ...itemData, id: personalModalState.id });
+          nextPF = personalFinances.map(item => item.id === personalModalState.id ? updatedEntry : item);
+          setPersonalFinances(nextPF);
+          notify("Movimiento personal actualizado ☁️");
         }
+        markDirtyId(updatedEntry.id);
         setPersonalModalState(null);
 
         if (supabase) {
-          const { error } = await supabase.from("finanzas_personales").upsert([updatedEntry]);
-          if (error) {
-            const { wallet, ...fallbackEntry } = updatedEntry;
-            await supabase.from("finanzas_personales").upsert([fallbackEntry]);
-          }
+          const { error } = await upsertPersonalFinanceToSupabase(updatedEntry);
+          if (!error) markSyncedId(updatedEntry.id);
+          await saveCloudSnapshot({ personalFinances: nextPF });
         }
       };
 
       const handleDeletePersonalFinance = async (id) => {
         if (confirm("¿Eliminar este movimiento de tus finanzas personales?")) {
-          setPersonalFinances(prev => prev.filter(i => i.id !== id));
+          const nextPF = personalFinances.filter(i => i.id !== id);
+          markDeletedId(id);
+          setPersonalFinances(nextPF);
           notify("Movimiento eliminado", "warn");
           if (supabase) {
             await supabase.from("finanzas_personales").delete().eq("id", id);
+            await saveCloudSnapshot({ personalFinances: nextPF });
           }
         }
       };
@@ -935,8 +1511,24 @@
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {isSupabaseConfigured && (
-                  <button onClick={fetchDataFromSupabase} style={styles.themeToggleBtn} title="Sincronizar">
-                    <Icon name="refresh-cw" size={14} color="#94A3B8" />
+                  <button
+                    onClick={() => setSyncModalOpen(true)}
+                    style={{
+                      ...styles.themeToggleBtn,
+                      borderColor: syncStatus.state === "error" ? "rgba(248,113,113,0.45)" : syncStatus.state === "warn" ? "rgba(251,191,36,0.45)" : "rgba(52,211,153,0.35)",
+                      gap: 5,
+                      padding: "6px 9px"
+                    }}
+                    title="Centro de Sincronización en la Nube"
+                  >
+                    <Icon
+                      name={isSyncing ? "refresh-cw" : "cloud"}
+                      size={14}
+                      color={syncStatus.state === "error" ? "#F87171" : syncStatus.state === "warn" ? "#FBBF24" : "#34D399"}
+                    />
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#E2E8F0" }}>
+                      {isSyncing ? "Sync..." : "Nube"}
+                    </span>
                   </button>
                 )}
                 <button
@@ -960,10 +1552,16 @@
                   onError={(e) => { e.target.style.display = "none"; }}
                   style={{ width: 36, height: 36, objectFit: "contain" }}
                 />
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setSyncModalOpen(true)} title="Abrir Centro de Sincronización">
                   <div style={styles.brandTitle}>Almacén</div>
-                  <div style={styles.brandSub}>
-                    {isSupabaseConfigured ? "☁️ Nube Supabase Activa" : "💾 Modo Local"}
+                  <div style={{ ...styles.brandSub, color: syncStatus.state === "error" ? "#FCA5A5" : syncStatus.state === "warn" ? "#FCD34D" : "#6EE7B7" }}>
+                    {!isSupabaseConfigured
+                      ? "💾 Modo Local"
+                      : isSyncing
+                      ? "🔄 Sincronizando..."
+                      : syncStatus.state === "error"
+                      ? "⚠️ Revisar Nube (Clic)"
+                      : `☁️ Nube Activa ${syncStatus.lastSync ? "• " + syncStatus.lastSync : ""}`}
                   </div>
                 </div>
                 <button
@@ -1005,13 +1603,44 @@
                 ))}
               </nav>
 
+              {isSupabaseConfigured && (
+                <button
+                  onClick={() => setSyncModalOpen(true)}
+                  style={{
+                    background: "rgba(52, 211, 153, 0.1)",
+                    border: "1px solid rgba(52, 211, 153, 0.3)",
+                    color: "#6EE7B7",
+                    borderRadius: 10,
+                    padding: "8px 10px",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 6,
+                    marginBottom: 10
+                  }}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Icon name="cloud" size={14} color="#34D399" />
+                    <span>Sincronizar Dispositivos</span>
+                  </span>
+                  <Icon name="chevron-right" size={13} color="#6EE7B7" />
+                </button>
+              )}
+
               <div style={styles.footerStatus}>
-                <span style={styles.statusDot}></span>
+                <span style={{
+                  ...styles.statusDot,
+                  background: syncStatus.state === "error" ? "#EF4444" : syncStatus.state === "warn" ? "#F59E0B" : "#34D399",
+                  boxShadow: `0 0 8px ${syncStatus.state === "error" ? "#EF4444" : syncStatus.state === "warn" ? "#F59E0B" : "#34D399"}`
+                }}></span>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {isSyncing ? "Sincronizando..." : currentUser.email}
+                  {isSyncing ? "Sincronizando nube..." : currentUser.email}
                 </span>
                 {isSupabaseConfigured && (
-                  <button onClick={fetchDataFromSupabase} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", color: "#94A3B8" }} title="Actualizar datos">
+                  <button onClick={() => fetchDataFromSupabase(false, false)} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", color: "#94A3B8" }} title="Sincronizar ahora">
                     <Icon name="refresh-cw" size={12} />
                   </button>
                 )}
@@ -1020,6 +1649,19 @@
           )}
 
           <main style={{ ...styles.main, ...(isMobile ? styles.mainMobile : {}) }}>
+            {syncStatus.state === "error" && (
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
+                background: "rgba(239, 68, 68, 0.14)", border: "1px solid rgba(248, 113, 113, 0.4)",
+                borderRadius: 12, padding: "10px 14px", marginBottom: 16, fontSize: 12.5, color: "#FECACA"
+              }}>
+                <span>⚠️ <strong>Sincronización en Nube bloqueada o incompleta:</strong> {syncStatus.error}</span>
+                <button style={styles.smallGlassBtn} onClick={() => setSyncModalOpen(true)}>
+                  Reparar / Sincronizar Ahora
+                </button>
+              </div>
+            )}
+
             {tab === "dashboard" && (
               <Dashboard
                 currentUser={currentUser}
@@ -1318,17 +1960,25 @@
               <UsersManager
                 users={users}
                 rolePermissions={rolePermissions}
-                setRolePermissions={(newPerms) => {
+                setRolePermissions={async (newPerms) => {
                   setRolePermissions(newPerms);
                   registerAudit("Permisos Actualizados", "Se actualizaron los permisos de rol");
-                  notify("Permisos actualizados");
+                  notify("Permisos actualizados y sincronizados ☁️");
+                  await saveCloudSnapshot({ rolePermissions: newPerms });
                 }}
                 auditLog={auditLog}
                 onAddUser={async (u) => {
-                  setUsers(prev => [...prev, u]);
-                  registerAudit("Usuario Creado", `${u.name} (${u.role})`);
-                  notify("Usuario agregado");
-                  if (supabase) await supabase.from("usuarios").insert([u]);
+                  const cleanU = normalizeUser(u);
+                  markDirtyId(cleanU.id);
+                  const nextUsers = [...users, cleanU];
+                  setUsers(nextUsers);
+                  registerAudit("Usuario Creado", `${cleanU.name} (${cleanU.role})`);
+                  notify("Usuario agregado y sincronizado ☁️");
+                  if (supabase) {
+                    const { error } = await upsertUserToSupabase(cleanU);
+                    if (!error) markSyncedId(cleanU.id);
+                    await saveCloudSnapshot({ users: nextUsers });
+                  }
                 }}
               />
             )}
@@ -1363,6 +2013,25 @@
           )}
 
           {/* MODALES */}
+          {syncModalOpen && (
+            <CloudSyncModal
+              syncStatus={syncStatus}
+              isSyncing={isSyncing}
+              counts={{
+                usuarios: users.length,
+                productos: products.length,
+                ventas: sales.length,
+                gastos: expenses.length,
+                clientes: customers.length,
+                finanzas_personales: personalFinances.length
+              }}
+              onPushAll={pushAllLocalDataToSupabase}
+              onPullAll={() => fetchDataFromSupabase(false, true)}
+              onClose={() => setSyncModalOpen(false)}
+              notify={notify}
+            />
+          )}
+
           {productModalState && (
             <ProductModal
               product={productModalState === "new" ? null : productModalState}
@@ -1415,6 +2084,150 @@
               onSave={handleSavePersonalFinance}
             />
           )}
+        </div>
+      );
+    }
+
+    // ============ MODAL DE SINCRONIZACIÓN MULTI-DISPOSITIVO (NUBE SUPABASE) ============
+    function CloudSyncModal({ syncStatus, isSyncing, counts, onPushAll, onPullAll, onClose, notify }) {
+      const [showSql, setShowSql] = useState(syncStatus.state === "error");
+
+      const sqlScript = `-- Ejecuta este script en el SQL Editor de tu proyecto Supabase para asegurar todas las tablas y columnas:
+CREATE TABLE IF NOT EXISTS usuarios (
+  id text PRIMARY KEY, name text, email text, pass text, role text
+);
+CREATE TABLE IF NOT EXISTS productos (
+  id text PRIMARY KEY, name text, category text, sku text, barcode text,
+  "costPrice" numeric DEFAULT 0, "salePrice" numeric DEFAULT 0, "minStock" integer DEFAULT 0,
+  "stockByLocation" jsonb DEFAULT '{}'::jsonb
+);
+CREATE TABLE IF NOT EXISTS ventas (
+  id text PRIMARY KEY, date text, "customerName" text, "paymentMethod" text, total numeric DEFAULT 0, details text
+);
+CREATE TABLE IF NOT EXISTS gastos (
+  id text PRIMARY KEY, date text, category text, description text, amount numeric DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS clientes (
+  id text PRIMARY KEY, name text, phone text
+);
+CREATE TABLE IF NOT EXISTS finanzas_personales (
+  id text PRIMARY KEY, date text, type text, wallet text DEFAULT 'Tarjeta', category text, description text, amount numeric DEFAULT 0
+);
+
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS barcode text;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS "costPrice" numeric DEFAULT 0;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS "salePrice" numeric DEFAULT 0;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS "minStock" integer DEFAULT 0;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS "stockByLocation" jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS "customerName" text;
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS "paymentMethod" text;
+ALTER TABLE finanzas_personales ADD COLUMN IF NOT EXISTS wallet text DEFAULT 'Tarjeta';
+
+ALTER TABLE usuarios DISABLE ROW LEVEL SECURITY;
+ALTER TABLE productos DISABLE ROW LEVEL SECURITY;
+ALTER TABLE ventas DISABLE ROW LEVEL SECURITY;
+ALTER TABLE gastos DISABLE ROW LEVEL SECURITY;
+ALTER TABLE clientes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
+
+      const copySql = () => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(sqlScript);
+          notify("Script SQL copiado al portapapeles 📋");
+        }
+      };
+
+      const tables = [
+        { key: "productos", label: "Productos & Stock", count: counts.productos },
+        { key: "ventas", label: "Ventas", count: counts.ventas },
+        { key: "gastos", label: "Gastos Negocio", count: counts.gastos },
+        { key: "finanzas_personales", label: "Espacio Personal", count: counts.finanzas_personales },
+        { key: "clientes", label: "Clientes", count: counts.clientes },
+        { key: "usuarios", label: "Usuarios", count: counts.usuarios }
+      ];
+
+      return (
+        <div style={styles.overlay} onClick={onClose}>
+          <div className="responsive-modal" style={{ ...styles.glassModal, maxWidth: 580 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ ...styles.modalTitle, margin: 0 }}>☁️ Sincronización Multi-Dispositivo</h3>
+              <span style={syncStatus.state === "error" ? styles.badgeRed : styles.badgeGreen}>
+                {isSyncing ? "Sincronizando..." : syncStatus.state === "error" ? "Revisar Tablas" : "Conectado a Supabase"}
+              </span>
+            </div>
+
+            <p style={{ fontSize: 12.5, color: "#94A3B8", marginBottom: 14, lineHeight: 1.45 }}>
+              Si actualizaste datos en este PC y quieres asegurarte de que aparezcan de inmediato en tu celular u otro computador, presiona <strong>"Subir datos de este PC a la Nube"</strong>. En el otro dispositivo, presiona <strong>"Descargar de la Nube"</strong> (o simplemente recarga la página).
+            </p>
+
+            <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+              <button
+                type="button"
+                disabled={isSyncing}
+                style={{ ...styles.primaryBtn, justifyContent: "center", padding: "11px 12px" }}
+                onClick={onPushAll}
+              >
+                <Icon name="upload-cloud" size={16} />
+                <span>⬆️ Subir datos de este PC a la Nube</span>
+              </button>
+              <button
+                type="button"
+                disabled={isSyncing}
+                style={{ ...styles.sheetsExportBtn, justifyContent: "center", padding: "11px 12px" }}
+                onClick={onPullAll}
+              >
+                <Icon name="download-cloud" size={16} />
+                <span>⬇️ Descargar datos de la Nube</span>
+              </button>
+            </div>
+
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#94A3B8", marginBottom: 8 }}>
+                <span>Estado de tablas en la nube:</span>
+                <span>Última sinc.: <strong style={{ color: "#F8FAFC" }}>{syncStatus.lastSync || "Ahora"}</strong></span>
+              </div>
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {tables.map(t => {
+                  const st = syncStatus.tableStatus?.[t.key] || "OK";
+                  const isOk = st.startsWith("OK");
+                  return (
+                    <div key={t.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, padding: "5px 8px", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                      <span style={{ color: "#CBD5E1" }}>{t.label} ({t.count})</span>
+                      <span style={{ color: isOk ? "#34D399" : "#FBBF24", fontWeight: 600, fontSize: 10.5 }}>
+                        {isOk ? "✓ Sincronizado" : "⚡ Vía Espejo"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                style={{ background: "none", border: "none", color: "#38BDF8", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+                onClick={() => setShowSql(prev => !prev)}
+              >
+                {showSql ? "Ocultar Script SQL de Supabase" : "🛠️ ¿Problemas de permisos (RLS) o columnas en Supabase? Ver Script SQL reparador"}
+              </button>
+
+              {showSql && (
+                <div style={{ marginTop: 8, background: "rgba(0,0,0,0.35)", border: "1px solid rgba(56,189,248,0.25)", borderRadius: 8, padding: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, color: "#BAE6FD" }}>Pega esto en Supabase &rarr; SQL Editor &rarr; Run:</span>
+                    <button type="button" style={styles.smallGlassBtn} onClick={copySql}>📋 Copiar SQL</button>
+                  </div>
+                  <pre style={{ fontSize: 10.5, color: "#E2E8F0", maxHeight: 130, overflowY: "auto", whiteSpace: "pre-wrap", margin: 0 }}>
+                    {sqlScript}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cerrar</button>
+            </div>
+          </div>
         </div>
       );
     }
