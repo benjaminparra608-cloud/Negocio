@@ -252,6 +252,25 @@
     ];
 
     const PERSONAL_WALLETS_KEY = "negocio_personal_wallets_v2";
+    const CREDIT_CARD_CONFIG_KEY = "negocio_credit_card_v2";
+
+    const defaultCreditCardConfig = {
+      cardName: "Tarjeta de Crédito Principal",
+      totalLimit: 1000000,
+      baseUsed: 0,
+      paymentDay: 5,
+      billingDay: 20,
+      nextPaymentDate: ""
+    };
+
+    const normalizeCreditCardConfig = (raw) => ({
+      cardName: String(raw?.cardName || defaultCreditCardConfig.cardName),
+      totalLimit: Math.max(0, Number(raw?.totalLimit ?? defaultCreditCardConfig.totalLimit)),
+      baseUsed: Number(raw?.baseUsed ?? 0),
+      paymentDay: Math.min(31, Math.max(1, Number(raw?.paymentDay || defaultCreditCardConfig.paymentDay))),
+      billingDay: Math.min(31, Math.max(1, Number(raw?.billingDay || defaultCreditCardConfig.billingDay))),
+      nextPaymentDate: String(raw?.nextPaymentDate || "")
+    });
 
     const getStoredWalletMap = () => {
       try {
@@ -271,15 +290,80 @@
 
     const getPersonalWallet = (item) => {
       if (!item) return "Tarjeta";
-      if (item.wallet === "Efectivo" || item.wallet === "Tarjeta") return item.wallet;
+      if (item.wallet === "Efectivo" || item.wallet === "Tarjeta" || item.wallet === "Crédito") return item.wallet;
+      if (item.wallet === "Credito") return "Crédito";
       if (item.paymentMethod === "Efectivo") return "Efectivo";
       const desc = String(item.description || "");
       if (/^\[Efectivo\]/i.test(desc)) return "Efectivo";
+      if (/^\[(Crédito|Credito)\]/i.test(desc)) return "Crédito";
       if (/^\[Tarjeta\]/i.test(desc)) return "Tarjeta";
       const map = getStoredWalletMap();
       if (item.id && map[item.id]) return map[item.id];
       if (item.id === "pf-2" || item.id === "pf-4") return "Efectivo";
       return "Tarjeta";
+    };
+
+    const getCreditCardSummary = (personalFinancesList, rawConfig) => {
+      const cfg = normalizeCreditCardConfig(rawConfig);
+      const list = Array.isArray(personalFinancesList) ? personalFinancesList : [];
+      const creditMovements = list.filter(f => getPersonalWallet(f) === "Crédito");
+      const usedFromPurchases = creditMovements
+        .filter(f => f.type === "gasto")
+        .reduce((acc, f) => acc + Number(f.amount || 0), 0);
+      const freedFromPayments = creditMovements
+        .filter(f => f.type === "ingreso")
+        .reduce((acc, f) => acc + Number(f.amount || 0), 0);
+
+      const totalLimit = Math.max(0, Number(cfg.totalLimit || 0));
+      const netMovementUsed = usedFromPurchases - freedFromPayments;
+      const usedAmount = Math.max(0, Number(cfg.baseUsed || 0) + netMovementUsed);
+      const availableCredit = Math.max(0, totalLimit - usedAmount);
+      const usagePercent = totalLimit > 0 ? Math.min(100, Math.round((usedAmount / totalLimit) * 100)) : 0;
+      const availablePercent = totalLimit > 0 ? Math.max(0, 100 - usagePercent) : 0;
+
+      // Cálculo de próxima fecha de pago y días restantes
+      const now = new Date();
+      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let targetDate = null;
+
+      if (cfg.nextPaymentDate && /^\d{4}-\d{2}-\d{2}$/.test(cfg.nextPaymentDate)) {
+        const [y, m, d] = cfg.nextPaymentDate.split("-").map(Number);
+        const explicitDate = new Date(y, m - 1, d);
+        if (!isNaN(explicitDate.getTime()) && explicitDate >= todayMidnight) {
+          targetDate = explicitDate;
+        }
+      }
+
+      if (!targetDate) {
+        const payDay = cfg.paymentDay;
+        const daysInCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const candidateThisMonth = new Date(now.getFullYear(), now.getMonth(), Math.min(payDay, daysInCurrentMonth));
+        if (candidateThisMonth >= todayMidnight) {
+          targetDate = candidateThisMonth;
+        } else {
+          const daysInNextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0).getDate();
+          targetDate = new Date(now.getFullYear(), now.getMonth() + 1, Math.min(payDay, daysInNextMonth));
+        }
+      }
+
+      const diffMs = targetDate.getTime() - todayMidnight.getTime();
+      const daysUntilPayment = Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+      const nextPaymentFormatted = targetDate.toLocaleDateString("es-CL", { day: "2-digit", month: "long" });
+
+      return {
+        ...cfg,
+        totalLimit,
+        usedAmount,
+        availableCredit,
+        usedFromPurchases,
+        freedFromPayments,
+        netMovementUsed,
+        usagePercent,
+        availablePercent,
+        daysUntilPayment,
+        nextPaymentFormatted,
+        creditMovementsCount: creditMovements.length
+      };
     };
 
     const initialPersonalFinances = [
@@ -313,7 +397,7 @@
     };
 
     const EXPENSE_CATEGORIES = ["Arriendo", "Insumos", "Sueldos", "Servicios", "Marketing", "Transporte", "Otros"];
-    const PERSONAL_CATEGORIES = ["Alimentación", "Vivienda", "Transporte", "Servicios Personales", "Salud & Bienestar", "Ocio & Viajes", "Ahorro / Inversión", "Retiro de Ganancias", "Otros Ingresos", "Otros Gastos"];
+    const PERSONAL_CATEGORIES = ["Alimentación", "Vivienda", "Transporte", "Servicios Personales", "Salud & Bienestar", "Ocio & Viajes", "Compras con Tarjeta de Crédito", "Pago / Abono Tarjeta de Crédito", "Ahorro / Inversión", "Retiro de Ganancias", "Otros Ingresos", "Otros Gastos"];
     const PRODUCT_CATEGORIES = ["Ropa", "Bazar", "Accesorios", "Calzado", "Electrónica", "Hogar", "Alimentos", "Otros"];
 
     // ============ NORMALIZADORES Y ADAPTADORES MULTIFORMATO SUPABASE ============
@@ -406,15 +490,17 @@
     const normalizePersonalFinance = (r) => {
       const rawDesc = String(r.description || "");
       let detectedWallet = r.wallet;
-      if (detectedWallet !== "Efectivo" && detectedWallet !== "Tarjeta") {
+      if (detectedWallet === "Credito") detectedWallet = "Crédito";
+      if (detectedWallet !== "Efectivo" && detectedWallet !== "Tarjeta" && detectedWallet !== "Crédito") {
         if (/^\[Efectivo\]/i.test(rawDesc)) detectedWallet = "Efectivo";
+        else if (/^\[(Crédito|Credito)\]/i.test(rawDesc)) detectedWallet = "Crédito";
         else if (/^\[Tarjeta\]/i.test(rawDesc)) detectedWallet = "Tarjeta";
         else {
           const map = getStoredWalletMap();
           detectedWallet = (r.id && map[r.id]) || (r.id === "pf-2" || r.id === "pf-4" ? "Efectivo" : "Tarjeta");
         }
       }
-      const cleanDesc = rawDesc.replace(/^\[(Efectivo|Tarjeta)\]\s*/i, "").trim();
+      const cleanDesc = rawDesc.replace(/^\[(Efectivo|Tarjeta|Crédito|Credito)\]\s*/i, "").trim();
       if (r.id) saveWalletInMap(r.id, detectedWallet);
       return {
         id: String(r.id),
@@ -592,6 +678,17 @@
       const [customers, setCustomers] = useState(() => (cachedData?.customers || initialMockCustomers).filter(c => c && c.id !== META_SYNC_ID).map(normalizeCustomer));
       const [personalFinances, setPersonalFinances] = useState(() => (cachedData?.personalFinances || initialPersonalFinances).filter(pf => pf && pf.id !== META_SYNC_ID).map(normalizePersonalFinance));
 
+      const [creditCardConfig, setCreditCardConfig] = useState(() => {
+        try {
+          const saved = localStorage.getItem(CREDIT_CARD_CONFIG_KEY);
+          if (saved) return normalizeCreditCardConfig(JSON.parse(saved));
+          if (cachedData?.creditCardConfig) return normalizeCreditCardConfig(cachedData.creditCardConfig);
+          return defaultCreditCardConfig;
+        } catch (e) {
+          return defaultCreditCardConfig;
+        }
+      });
+
       const [rolePermissions, setRolePermissions] = useState(() => {
         try {
           const saved = localStorage.getItem(PERMS_STORAGE_KEY);
@@ -622,10 +719,10 @@
       const [toast, setToast] = useState(null);
       const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth <= 860 : false);
 
-      const stateRef = useRef({ users, products, sales, expenses, customers, personalFinances, rolePermissions });
+      const stateRef = useRef({ users, products, sales, expenses, customers, personalFinances, rolePermissions, creditCardConfig });
       useEffect(() => {
-        stateRef.current = { users, products, sales, expenses, customers, personalFinances, rolePermissions };
-      }, [users, products, sales, expenses, customers, personalFinances, rolePermissions]);
+        stateRef.current = { users, products, sales, expenses, customers, personalFinances, rolePermissions, creditCardConfig };
+      }, [users, products, sales, expenses, customers, personalFinances, rolePermissions, creditCardConfig]);
 
       const activeSavesCountRef = useRef(0);
       const lastSaveFinishedAtRef = useRef(0);
@@ -645,6 +742,7 @@
       const [expenseModalState, setExpenseModalState] = useState(null);
       const [customerModalState, setCustomerModalState] = useState(null);
       const [personalModalState, setPersonalModalState] = useState(null);
+      const [creditCardModalOpen, setCreditCardModalOpen] = useState(false);
       const [transferModalOpen, setTransferModalOpen] = useState(false);
 
       const notify = useCallback((msg, type = "ok") => {
@@ -676,10 +774,14 @@
       useEffect(() => {
         try {
           localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify({
-            users, products, sales, expenses, customers, personalFinances
+            users, products, sales, expenses, customers, personalFinances, creditCardConfig
           }));
         } catch (e) {}
-      }, [users, products, sales, expenses, customers, personalFinances]);
+      }, [users, products, sales, expenses, customers, personalFinances, creditCardConfig]);
+
+      useEffect(() => {
+        try { localStorage.setItem(CREDIT_CARD_CONFIG_KEY, JSON.stringify(creditCardConfig)); } catch (e) {}
+      }, [creditCardConfig]);
 
       useEffect(() => {
         try { localStorage.setItem(PERMS_STORAGE_KEY, JSON.stringify(rolePermissions)); } catch (e) {}
@@ -726,6 +828,9 @@
           pfList.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
           setPersonalFinances(pfList);
         }
+        if (payload.creditCardConfig) {
+          setCreditCardConfig(normalizeCreditCardConfig(payload.creditCardConfig));
+        }
         if (payload.rolePermissions) {
           setRolePermissions(prev => ({ ...defaultRolePermissions, ...prev, ...payload.rolePermissions }));
         }
@@ -759,6 +864,7 @@
             deviceId: DEVICE_ID,
             deletedIds: mergedDeleted,
             rolePermissions: current.rolePermissions,
+            creditCardConfig: normalizeCreditCardConfig(current.creditCardConfig),
             products: (current.products || []).filter(p => p && p.id !== META_SYNC_ID).map(normalizeProduct),
             sales: (current.sales || []).filter(s => s && s.id !== META_SYNC_ID).map(normalizeSale),
             expenses: (current.expenses || []).filter(e => e && e.id !== META_SYNC_ID).map(normalizeExpense),
@@ -1018,6 +1124,9 @@
           setCustomers(cMerged.list);
           setPersonalFinances(pfMerged.list);
 
+          if (cloudMeta?.creditCardConfig) {
+            setCreditCardConfig(normalizeCreditCardConfig(cloudMeta.creditCardConfig));
+          }
           if (cloudMeta?.rolePermissions) {
             setRolePermissions(prev => ({ ...defaultRolePermissions, ...prev, ...cloudMeta.rolePermissions }));
           }
@@ -1059,6 +1168,7 @@
                 expenses: eMerged.list,
                 customers: cMerged.list,
                 personalFinances: pfMerged.list,
+                creditCardConfig: cloudMeta?.creditCardConfig || current.creditCardConfig,
                 rolePermissions: cloudMeta?.rolePermissions || current.rolePermissions
               }, mergedDeletedIds)
             ]);
@@ -1642,6 +1752,30 @@
         }
       };
 
+      const handleSaveCreditCardConfig = async (newConfig) => {
+        const cleanCfg = normalizeCreditCardConfig({
+          ...creditCardConfig,
+          ...newConfig,
+          updatedAt: Date.now()
+        });
+        setCreditCardConfig(cleanCfg);
+        try {
+          localStorage.setItem(CREDIT_CARD_CONFIG_KEY, JSON.stringify(cleanCfg));
+        } catch (err) {}
+        setCreditCardModalOpen(false);
+        notify("Configuración de Tarjeta de Crédito guardada y sincronizada ☁️");
+
+        if (supabase) {
+          activeSavesCountRef.current += 1;
+          try {
+            await saveCloudSnapshot({ creditCardConfig: cleanCfg });
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
+        }
+      };
+
       // CONDICIONAL DE AUTENTICACIÓN (DESPUÉS DE TODOS LOS HOOKS)
       if (!currentUser) {
         return <AuthScreen onLogin={handleLogin} onRegister={handleRegister} users={users} />;
@@ -1663,10 +1797,6 @@
       const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount || 0), 0);
       const profit = totalSales - totalExpenses;
 
-      const personalIncome = personalFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
-      const personalExpense = personalFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
-      const personalBalance = personalIncome - personalExpense;
-
       const personalCashIncome = personalFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
       const personalCashExpense = personalFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
       const personalCashBalance = personalCashIncome - personalCashExpense;
@@ -1674,6 +1804,12 @@
       const personalCardIncome = personalFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
       const personalCardExpense = personalFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
       const personalCardBalance = personalCardIncome - personalCardExpense;
+
+      const personalIncome = personalCashIncome + personalCardIncome;
+      const personalExpense = personalCashExpense + personalCardExpense;
+      const personalBalance = personalCashBalance + personalCardBalance;
+
+      const creditCardSummary = getCreditCardSummary(personalFinances, creditCardConfig);
 
       const handleExportBusinessFinances = () => {
         const today = new Date().toISOString().slice(0, 10);
@@ -1709,22 +1845,35 @@
           ["Período:", periodLabel, "", "", "", ""],
           [""],
           ["--- REGISTRO DE MOVIMIENTOS PERSONALES ---", "", "", "", "", ""],
-          ["Fecha", "Tipo", "Medio (Efectivo/Tarjeta)", "Categoría", "Descripción / Motivo", "Monto ($)"],
-          ...filteredList.map(p => [
-            p.date,
-            p.type === "ingreso" ? "Ingreso (+)" : "Gasto (-)",
-            getPersonalWallet(p),
-            p.category,
-            p.description || "-",
-            p.type === "ingreso" ? p.amount : -Math.abs(p.amount)
-          ]),
+          ["Fecha", "Tipo", "Medio (Efectivo/Tarjeta/Crédito)", "Categoría", "Descripción / Motivo", "Monto ($)"],
+          ...filteredList.map(p => {
+            const w = getPersonalWallet(p);
+            const tipoLabel = w === "Crédito"
+              ? (p.type === "ingreso" ? "Pago / Abono Cupo (+)" : "Compra / Uso Cupo (-)")
+              : (p.type === "ingreso" ? "Ingreso (+)" : "Gasto (-)");
+            return [
+              p.date,
+              tipoLabel,
+              w === "Crédito" ? "Tarjeta de Crédito (Cupo)" : w,
+              p.category,
+              p.description || "-",
+              p.type === "ingreso" ? p.amount : -Math.abs(p.amount)
+            ];
+          }),
           [""],
           ["--- BALANCE PERSONAL DEL PERÍODO ---", "", "", "", "", ""],
-          ["Total Ingresos Personales", "", "", "", "", pIncome],
-          ["Total Gastos Personales", "", "", "", "", pExpense],
+          ["Total Ingresos Personales (Efectivo + Débito)", "", "", "", "", pIncome],
+          ["Total Gastos Personales (Efectivo + Débito)", "", "", "", "", pExpense],
           ["Saldo en Efectivo", "", "", "", "", pCashBalance],
           ["Saldo en Tarjeta / Banco", "", "", "", "", pCardBalance],
-          ["SALDO TOTAL DISPONIBLE", "", "", "", "", pBalance]
+          ["SALDO TOTAL DISPONIBLE (EFECTIVO + BANCO)", "", "", "", "", pBalance],
+          [""],
+          ["--- ESTADO TARJETA DE CRÉDITO (CUPO & PAGO) ---", "", "", "", "", ""],
+          ["Tarjeta", creditCardSummary.cardName, "", "", "", ""],
+          ["Cupo Total Tarjeta", "", "", "", "", creditCardSummary.totalLimit],
+          ["Cupo Utilizado (Deuda Actual)", "", "", "", "", creditCardSummary.usedAmount],
+          ["CUPO DISPONIBLE ACTUAL", "", "", "", "", creditCardSummary.availableCredit],
+          ["Día de Pago Mensual", `Día ${creditCardSummary.paymentDay}`, "Próximo Vencimiento:", creditCardSummary.nextPaymentFormatted, `Faltan ${creditCardSummary.daysUntilPayment} días`, ""]
         ];
         exportToGoogleSheetsCSV(`Finanzas_Personales_${periodLabel.replace(/\s+/g, '_')}_${today}.csv`, rows);
       };
@@ -1965,6 +2114,8 @@
                 personalBalance={personalBalance}
                 personalCashBalance={personalCashBalance}
                 personalCardBalance={personalCardBalance}
+                creditCardSummary={creditCardSummary}
+                onOpenCreditCardConfig={() => setCreditCardModalOpen(true)}
                 onNewSale={() => setSaleModalState("new")}
                 onNewPersonal={(preset) => setPersonalModalState(preset ? { isPreset: true, ...preset } : "new")}
                 onGoToPersonal={() => setTab("personal")}
@@ -1977,6 +2128,8 @@
             {tab === "personal" && canAccessPersonal && (
               <PersonalFinancesManager
                 personalFinances={personalFinances}
+                creditCardSummary={creditCardSummary}
+                onOpenCreditCardConfig={() => setCreditCardModalOpen(true)}
                 onNew={(preset) => setPersonalModalState(preset ? { isPreset: true, ...preset } : "new")}
                 onEdit={(item) => setPersonalModalState(item)}
                 onDelete={handleDeletePersonalFinance}
@@ -2376,8 +2529,17 @@
           {personalModalState && (
             <PersonalFinanceModal
               item={personalModalState === "new" ? null : personalModalState}
+              creditCardSummary={creditCardSummary}
               onClose={() => setPersonalModalState(null)}
               onSave={handleSavePersonalFinance}
+            />
+          )}
+
+          {creditCardModalOpen && (
+            <CreditCardConfigModal
+              creditCardSummary={creditCardSummary}
+              onClose={() => setCreditCardModalOpen(false)}
+              onSave={handleSaveCreditCardConfig}
             />
           )}
         </div>
@@ -2715,7 +2877,7 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
     function Dashboard({
       currentUser, canAccessSales, canAccessPersonal, canViewCosts, sales, expenses, products, lowStock, locations, customers,
       totalSales, totalExpenses, profit, personalFinances, personalIncome, personalExpense, personalBalance,
-      personalCashBalance, personalCardBalance,
+      personalCashBalance, personalCardBalance, creditCardSummary, onOpenCreditCardConfig,
       onNewSale, onNewPersonal, onGoToPersonal, onGoToInventory, onExportBusiness, onExportPersonal
     }) {
       const [selectedProdFilter, setSelectedProdFilter] = useState("all");
@@ -3208,20 +3370,46 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                   </div>
                 </div>
 
-                <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={styles.kpiLabel}>Flujo Personal Global</span>
-                    <Icon name="activity" size={15} color="#C084FC" />
+                {creditCardSummary && (
+                  <div style={{ ...styles.kpiCard, borderColor: "rgba(251, 191, 36, 0.4)", background: "rgba(245, 158, 11, 0.07)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ ...styles.kpiLabel, color: "#FDE68A" }}>💎 Cupo Tarjeta Crédito</span>
+                      <button
+                        type="button"
+                        onClick={onOpenCreditCardConfig}
+                        style={{ background: "none", border: "none", color: "#FBBF24", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: 0 }}
+                        title="Configurar Cupo y Día de Pago"
+                      >
+                        ⚙️ Config
+                      </button>
+                    </div>
+                    <div style={{ ...styles.kpiValue, color: "#FBBF24" }}>
+                      {money(creditCardSummary.availableCredit)}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#CBD5E1", marginTop: 3 }}>
+                      <span>Usado: <strong style={{ color: "#F87171" }}>{money(creditCardSummary.usedAmount)}</strong></span>
+                      <span style={{ color: creditCardSummary.daysUntilPayment <= 5 ? "#FCA5A5" : "#A7F3D0", fontWeight: 600 }}>
+                        📅 Pago día {creditCardSummary.paymentDay} ({creditCardSummary.daysUntilPayment === 0 ? "Hoy" : `${creditCardSummary.daysUntilPayment}d`})
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <button
+                        type="button"
+                        style={styles.quickActionMinusBtn}
+                        onClick={() => onNewPersonal({ type: "gasto", wallet: "Crédito", category: "Compras con Tarjeta de Crédito" })}
+                      >
+                        - Usar Cupo
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.quickActionPlusBtn}
+                        onClick={() => onNewPersonal({ type: "ingreso", wallet: "Crédito", category: "Pago / Abono Tarjeta de Crédito" })}
+                      >
+                        + Pagar Cupo
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 13, marginTop: 8, display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "#94A3B8" }}>Ingresos:</span>
-                    <strong style={{ color: "#34D399" }}>+{money(personalIncome)}</strong>
-                  </div>
-                  <div style={{ fontSize: 13, marginTop: 4, display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "#94A3B8" }}>Gastos:</span>
-                    <strong style={{ color: "#F87171" }}>-{money(personalExpense)}</strong>
-                  </div>
-                </div>
+                )}
 
                 <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -3231,7 +3419,7 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                   <div style={{ ...styles.kpiValue, color: personalBalance >= 0 ? "#C084FC" : "#F87171" }}>
                     {money(personalBalance)}
                   </div>
-                  <span style={styles.kpiSub}>Suma Efectivo + Tarjeta</span>
+                  <span style={styles.kpiSub}>Suma Efectivo + Tarjeta Débito</span>
                 </div>
               </div>
 
@@ -3246,14 +3434,22 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                   ) : (
                     personalFinances.slice(0, 4).map(item => {
                       const w = getPersonalWallet(item);
+                      const badgeStyle = w === "Efectivo"
+                        ? styles.walletBadgeCash
+                        : w === "Crédito"
+                        ? styles.walletBadgeCredit
+                        : styles.walletBadgeCard;
+                      const badgeLabel = w === "Efectivo"
+                        ? "💵 Efectivo"
+                        : w === "Crédito"
+                        ? "💎 T. Crédito"
+                        : "💳 Tarjeta";
                       return (
                         <div key={item.id} style={styles.listRow}>
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 13, color: "#F1F5F9", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                               <span>{item.description || item.category}</span>
-                              <span style={w === "Efectivo" ? styles.walletBadgeCash : styles.walletBadgeCard}>
-                                {w === "Efectivo" ? "💵 Efectivo" : "💳 Tarjeta"}
-                              </span>
+                              <span style={badgeStyle}>{badgeLabel}</span>
                             </div>
                             <span style={{ fontSize: 11, color: "#94A3B8" }}>{item.date} • {item.category}</span>
                           </div>
@@ -3278,7 +3474,11 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                     </div>
                     <div style={styles.glassNote}>
                       <Icon name="clock" size={15} color="#FBBF24" />
-                      <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>Revisar pagos de servicios básicos antes del fin de mes.</span>
+                      <span style={{ fontSize: 12.5, color: "#CBD5E1" }}>
+                        {creditCardSummary
+                          ? `Próximo pago de ${creditCardSummary.cardName}: ${creditCardSummary.nextPaymentFormatted} (faltan ${creditCardSummary.daysUntilPayment} días).`
+                          : "Revisar pagos de servicios básicos antes del fin de mes."}
+                      </span>
                     </div>
                     <div style={styles.glassNote}>
                       <Icon name="sparkles" size={15} color="#38BDF8" />
@@ -3293,8 +3493,8 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
       );
     }
 
-    // ============ MÓDULO PERSONAL CON SEPARACIÓN EFECTIVO Y TARJETA + FILTRO POR MES ============
-    function PersonalFinancesManager({ personalFinances, onNew, onEdit, onDelete, onExport }) {
+    // ============ MÓDULO PERSONAL CON SEPARACIÓN EFECTIVO, TARJETA Y CUPO DE CRÉDITO ============
+    function PersonalFinancesManager({ personalFinances, creditCardSummary, onOpenCreditCardConfig, onNew, onEdit, onDelete, onExport }) {
       const [selectedMonth, setSelectedMonth] = useState("");
       const [selectedWalletFilter, setSelectedWalletFilter] = useState("Todos");
 
@@ -3316,12 +3516,16 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
       }, [monthFilteredFinances, selectedWalletFilter]);
 
       const periodIncome = useMemo(() => {
-        return filteredFinances.filter(f => f.type === "ingreso").reduce((a, b) => a + Number(b.amount || 0), 0);
-      }, [filteredFinances]);
+        return filteredFinances
+          .filter(f => f.type === "ingreso" && (selectedWalletFilter === "Crédito" ? true : getPersonalWallet(f) !== "Crédito"))
+          .reduce((a, b) => a + Number(b.amount || 0), 0);
+      }, [filteredFinances, selectedWalletFilter]);
 
       const periodExpense = useMemo(() => {
-        return filteredFinances.filter(f => f.type === "gasto").reduce((a, b) => a + Number(b.amount || 0), 0);
-      }, [filteredFinances]);
+        return filteredFinances
+          .filter(f => f.type === "gasto" && (selectedWalletFilter === "Crédito" ? true : getPersonalWallet(f) !== "Crédito"))
+          .reduce((a, b) => a + Number(b.amount || 0), 0);
+      }, [filteredFinances, selectedWalletFilter]);
 
       const cashIncome = useMemo(() => {
         return monthFilteredFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
@@ -3342,12 +3546,20 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
       const periodBalance = periodIncome - periodExpense;
       const currentPeriodLabel = selectedMonth ? formatMonthLabel(selectedMonth) : "Historial Completo";
 
+      const paymentUrgencyColor = creditCardSummary
+        ? creditCardSummary.daysUntilPayment <= 3
+          ? "#F87171"
+          : creditCardSummary.daysUntilPayment <= 7
+          ? "#FBBF24"
+          : "#34D399"
+        : "#34D399";
+
       return (
         <div>
           <div style={styles.pageHeader}>
             <div>
-              <div style={{ ...styles.eyebrow, color: "#C084FC" }}>GESTIÓN INDEPENDIENTE • EFECTIVO & TARJETA</div>
-              <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳💵</h2>
+              <div style={{ ...styles.eyebrow, color: "#C084FC" }}>GESTIÓN INDEPENDIENTE • EFECTIVO, DÉBITO Y CUPO CRÉDITO</div>
+              <h2 style={styles.pageTitle}>Mi Espacio & Finanzas Personales 💳💵💎</h2>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -3369,9 +3581,10 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                 value={selectedWalletFilter}
                 onChange={e => setSelectedWalletFilter(e.target.value)}
               >
-                <option value="Todos">👛 Todos (Efectivo + Tarjeta)</option>
+                <option value="Todos">👛 Todos (Efectivo + Débito + Crédito)</option>
                 <option value="Efectivo">💵 Solo Efectivo</option>
-                <option value="Tarjeta">💳 Solo Tarjeta</option>
+                <option value="Tarjeta">💳 Solo Tarjeta Débito / Banco</option>
+                <option value="Crédito">💎 Solo Tarjeta de Crédito (Cupo)</option>
               </select>
 
               <button style={styles.purpleExportBtn} onClick={() => onExport(filteredFinances, currentPeriodLabel, periodIncome, periodExpense, periodBalance, cashBalance, cardBalance)}>
@@ -3388,7 +3601,7 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
               <Icon name="filter" size={14} color="#C084FC" />
               <span style={{ color: "#E9D5FF" }}>
                 Filtrando por: <strong>{selectedMonth ? formatMonthLabel(selectedMonth) : "Todos los meses"}</strong>
-                {selectedWalletFilter !== "Todos" ? ` • Medio: ${selectedWalletFilter}` : ""}
+                {selectedWalletFilter !== "Todos" ? ` • Medio: ${selectedWalletFilter === "Crédito" ? "Tarjeta de Crédito (Cupo)" : selectedWalletFilter}` : ""}
               </span>
               <button
                 style={{ ...styles.clearFilterBtn, color: "#C084FC" }}
@@ -3482,25 +3695,258 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
             </div>
           </div>
 
+          {/* NUEVA SECCIÓN: TARJETA DE CRÉDITO (CUPO DISPONIBLE, DÍAS DE PAGO Y + / - CUPO) */}
+          {creditCardSummary && (
+            <div style={{
+              ...styles.panel,
+              marginBottom: 18,
+              borderColor: "rgba(251, 191, 36, 0.4)",
+              background: "linear-gradient(145deg, rgba(245, 158, 11, 0.12) 0%, rgba(168, 85, 247, 0.08) 55%, rgba(15, 23, 42, 0.72) 100%)"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{
+                    background: "rgba(251, 191, 36, 0.18)",
+                    border: "1px solid rgba(251, 191, 36, 0.4)",
+                    padding: 11,
+                    borderRadius: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}>
+                    <Icon name="credit-card" size={24} color="#FBBF24" />
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: "#FDE68A", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                        💎 Tarjeta de Crédito • Control de Cupo y Fecha de Pago
+                      </span>
+                      <span style={{
+                        background: "rgba(251, 191, 36, 0.2)",
+                        border: "1px solid rgba(251, 191, 36, 0.4)",
+                        color: "#FEF3C7",
+                        padding: "2px 8px",
+                        borderRadius: 20,
+                        fontSize: 10.5,
+                        fontWeight: 700
+                      }}>
+                        {creditCardSummary.cardName}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#CBD5E1", marginTop: 3 }}>
+                      Facturación día <strong>{creditCardSummary.billingDay}</strong> • Día de pago mensual: <strong>Día {creditCardSummary.paymentDay}</strong> (Próximo vencimiento: <strong>{creditCardSummary.nextPaymentFormatted}</strong>)
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{
+                    background: "rgba(15, 23, 42, 0.65)",
+                    border: `1px solid ${paymentUrgencyColor}`,
+                    borderRadius: 10,
+                    padding: "6px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7
+                  }}>
+                    <Icon name="calendar-clock" size={15} color={paymentUrgencyColor} />
+                    <span style={{ fontSize: 12, color: "#F8FAFC", fontWeight: 700 }}>
+                      {creditCardSummary.daysUntilPayment === 0
+                        ? "⚠️ ¡Día de pago es HOY!"
+                        : creditCardSummary.daysUntilPayment === 1
+                        ? "⏰ ¡Mañana es día de pago!"
+                        : `📅 Faltan ${creditCardSummary.daysUntilPayment} días para pagar`}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    style={styles.amberBtn}
+                    onClick={onOpenCreditCardConfig}
+                  >
+                    <Icon name="settings" size={14} /> Configurar Cupo y Días de Pago
+                  </button>
+                </div>
+              </div>
+
+              {/* TARJETAS DE MÉTRICAS DE CUPO */}
+              <div className="responsive-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(195px, 1fr))", gap: 12, marginBottom: 14 }}>
+                <div style={{
+                  background: "rgba(16, 185, 129, 0.1)",
+                  border: "1px solid rgba(52, 211, 153, 0.35)",
+                  borderRadius: 12,
+                  padding: "12px 14px"
+                }}>
+                  <span style={{ fontSize: 11, color: "#A7F3D0", fontWeight: 700, textTransform: "uppercase" }}>
+                    ✨ Cupo Disponible (Me queda)
+                  </span>
+                  <div style={{ fontSize: 25, fontWeight: 800, color: "#34D399", marginTop: 4 }}>
+                    {money(creditCardSummary.availableCredit)}
+                  </div>
+                  <span style={{ fontSize: 11, color: "#6EE7B7" }}>
+                    {(100 - creditCardSummary.usagePercent).toFixed(1)}% libre para usar
+                  </span>
+                </div>
+
+                <div style={{
+                  background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid rgba(248, 113, 113, 0.32)",
+                  borderRadius: 12,
+                  padding: "12px 14px"
+                }}>
+                  <span style={{ fontSize: 11, color: "#FECACA", fontWeight: 700, textTransform: "uppercase" }}>
+                    📉 Cupo Utilizado / Deuda Actual
+                  </span>
+                  <div style={{ fontSize: 25, fontWeight: 800, color: "#F87171", marginTop: 4 }}>
+                    {money(creditCardSummary.usedAmount)}
+                  </div>
+                  <span style={{ fontSize: 11, color: "#FCA5A5" }}>
+                    {creditCardSummary.usagePercent.toFixed(1)}% del cupo ocupado
+                  </span>
+                </div>
+
+                <div style={{
+                  background: "rgba(255, 255, 255, 0.04)",
+                  border: "1px solid rgba(251, 191, 36, 0.3)",
+                  borderRadius: 12,
+                  padding: "12px 14px"
+                }}>
+                  <span style={{ fontSize: 11, color: "#FDE68A", fontWeight: 700, textTransform: "uppercase" }}>
+                    🏦 Cupo Total de la Tarjeta
+                  </span>
+                  <div style={{ fontSize: 23, fontWeight: 800, color: "#FBBF24", marginTop: 4 }}>
+                    {money(creditCardSummary.totalLimit)}
+                  </div>
+                  <span style={{ fontSize: 11, color: "#CBD5E1" }}>
+                    Límite total configurado
+                  </span>
+                </div>
+
+                <div style={{
+                  background: "rgba(168, 85, 247, 0.1)",
+                  border: "1px solid rgba(192, 132, 252, 0.3)",
+                  borderRadius: 12,
+                  padding: "12px 14px"
+                }}>
+                  <span style={{ fontSize: 11, color: "#E9D5FF", fontWeight: 700, textTransform: "uppercase" }}>
+                    🗓️ Próxima Fecha de Pago
+                  </span>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#F8FAFC", marginTop: 6 }}>
+                    Día {creditCardSummary.paymentDay} ({creditCardSummary.nextPaymentFormatted})
+                  </div>
+                  <span style={{ fontSize: 11, color: "#C084FC" }}>
+                    Corte/Facturación: día {creditCardSummary.billingDay}
+                  </span>
+                </div>
+              </div>
+
+              {/* BARRA VISUAL DE USO DEL CUPO */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#CBD5E1", marginBottom: 6 }}>
+                  <span>Barra de Cupo Disponible vs Utilizado</span>
+                  <span>
+                    Disponible: <strong style={{ color: "#34D399" }}>{money(creditCardSummary.availableCredit)}</strong> de <strong>{money(creditCardSummary.totalLimit)}</strong>
+                  </span>
+                </div>
+                <div style={{
+                  width: "100%",
+                  height: 12,
+                  background: "rgba(15, 23, 42, 0.7)",
+                  borderRadius: 999,
+                  overflow: "hidden",
+                  border: "1px solid rgba(255, 255, 255, 0.12)",
+                  display: "flex"
+                }}>
+                  <div style={{
+                    width: `${Math.min(100, Math.max(0, creditCardSummary.usagePercent))}%`,
+                    background: creditCardSummary.usagePercent > 80
+                      ? "linear-gradient(90deg, #F59E0B, #EF4444)"
+                      : "linear-gradient(90deg, #FBBF24, #F97316)",
+                    transition: "width 0.3s ease"
+                  }} title={`Utilizado: ${money(creditCardSummary.usedAmount)}`} />
+                  <div style={{
+                    flex: 1,
+                    background: "linear-gradient(90deg, rgba(16, 185, 129, 0.45), rgba(52, 211, 153, 0.75))"
+                  }} title={`Disponible: ${money(creditCardSummary.availableCredit)}`} />
+                </div>
+              </div>
+
+              {/* BOTONES DE ACCIÓN DIRECTA PARA USAR O LIBERAR CUPO */}
+              <div className="responsive-3col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10 }}>
+                <button
+                  type="button"
+                  style={styles.walletMinusBtn}
+                  onClick={() => onNew({ type: "gasto", wallet: "Crédito", category: "Compras con Tarjeta de Crédito" })}
+                >
+                  <Icon name="minus-circle" size={16} color="#F87171" />
+                  <span>- Usar Tarjeta (Restar del Cupo Disponible)</span>
+                </button>
+
+                <button
+                  type="button"
+                  style={styles.walletPlusBtn}
+                  onClick={() => onNew({ type: "ingreso", wallet: "Crédito", category: "Pago / Abono Tarjeta de Crédito" })}
+                >
+                  <Icon name="plus-circle" size={16} color="#34D399" />
+                  <span>+ Pagar / Abonar Tarjeta (Agregar al Cupo Disponible)</span>
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    ...styles.secondaryBtn,
+                    borderColor: selectedWalletFilter === "Crédito" ? "#FBBF24" : "rgba(255,255,255,0.16)",
+                    color: selectedWalletFilter === "Crédito" ? "#FDE68A" : "#E2E8F0",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6
+                  }}
+                  onClick={() => setSelectedWalletFilter(prev => prev === "Crédito" ? "Todos" : "Crédito")}
+                >
+                  <Icon name="list-filter" size={14} color="#FBBF24" />
+                  <span>{selectedWalletFilter === "Crédito" ? "Ver Todos" : `Ver Movimientos Crédito (${creditCardSummary.creditMovementsCount})`}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="responsive-kpi-grid" style={styles.kpiGrid}>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
               <span style={styles.kpiLabel}>
-                {selectedMonth ? `Ingresos (${formatMonthLabel(selectedMonth)})` : "Ingresos Totales"}
+                {selectedWalletFilter === "Crédito"
+                  ? "Abonos / Pagos de Cupo (+)"
+                  : selectedMonth ? `Ingresos (${formatMonthLabel(selectedMonth)})` : "Ingresos Totales (Efectivo + Débito)"}
               </span>
               <div style={{ ...styles.kpiValue, color: "#34D399" }}>{money(periodIncome)}</div>
             </div>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
               <span style={styles.kpiLabel}>
-                {selectedMonth ? `Gastos (${formatMonthLabel(selectedMonth)})` : "Gastos Totales"}
+                {selectedWalletFilter === "Crédito"
+                  ? "Compras con Crédito / Cupo Usado (-)"
+                  : selectedMonth ? `Gastos (${formatMonthLabel(selectedMonth)})` : "Gastos Totales (Efectivo + Débito)"}
               </span>
               <div style={{ ...styles.kpiValue, color: "#F87171" }}>{money(periodExpense)}</div>
             </div>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.35)", background: "rgba(168, 85, 247, 0.08)" }}>
               <span style={styles.kpiLabel}>
-                {selectedMonth ? `Saldo Neto del Mes` : "Saldo Personal Combinado"}
+                {selectedWalletFilter === "Crédito"
+                  ? "Cupo Disponible Actual"
+                  : selectedMonth ? `Saldo Neto del Mes` : "Saldo Personal Combinado"}
               </span>
-              <div style={{ ...styles.kpiValue, color: periodBalance >= 0 ? "#C084FC" : "#F87171" }}>{money(periodBalance)}</div>
-              <span style={styles.kpiSub}>Efectivo + Tarjeta</span>
+              <div style={{
+                ...styles.kpiValue,
+                color: selectedWalletFilter === "Crédito"
+                  ? "#FBBF24"
+                  : periodBalance >= 0 ? "#C084FC" : "#F87171"
+              }}>
+                {selectedWalletFilter === "Crédito" && creditCardSummary
+                  ? money(creditCardSummary.availableCredit)
+                  : money(periodBalance)}
+              </div>
+              <span style={styles.kpiSub}>
+                {selectedWalletFilter === "Crédito" ? "Cupo libre en tarjeta" : "Efectivo + Tarjeta Débito"}
+              </span>
             </div>
             <div style={{ ...styles.kpiCard, borderColor: "rgba(168, 85, 247, 0.25)" }}>
               <span style={styles.kpiLabel}>Movimientos Listados</span>
@@ -3532,17 +3978,31 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                   ) : (
                     filteredFinances.map(item => {
                       const wallet = getPersonalWallet(item);
+                      const isCredit = wallet === "Crédito";
+                      const badgeStyle = wallet === "Efectivo"
+                        ? styles.walletBadgeCash
+                        : isCredit
+                        ? styles.walletBadgeCredit
+                        : styles.walletBadgeCard;
+                      const badgeText = wallet === "Efectivo"
+                        ? "💵 Efectivo"
+                        : isCredit
+                        ? "💎 T. Crédito (Cupo)"
+                        : "💳 Tarjeta";
+                      const typeLabel = isCredit
+                        ? (item.type === "ingreso" ? "+ Abono Cupo" : "- Uso Cupo")
+                        : (item.type === "ingreso" ? "+ Ingreso" : "- Gasto");
                       return (
                         <tr key={item.id} style={styles.tableRow}>
                           <td style={{ padding: 10, color: "#94A3B8" }}>{item.date}</td>
                           <td>
                             <span style={item.type === "ingreso" ? styles.badgeGreen : styles.badgeRed}>
-                              {item.type === "ingreso" ? "+ Ingreso" : "- Gasto"}
+                              {typeLabel}
                             </span>
                           </td>
                           <td>
-                            <span style={wallet === "Efectivo" ? styles.walletBadgeCash : styles.walletBadgeCard}>
-                              {wallet === "Efectivo" ? "💵 Efectivo" : "💳 Tarjeta"}
+                            <span style={badgeStyle}>
+                              {badgeText}
                             </span>
                           </td>
                           <td style={{ color: "#E2E8F0" }}>{item.category}</td>
@@ -3942,16 +4402,44 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
       );
     }
 
-    function PersonalFinanceModal({ item, onClose, onSave }) {
+    function PersonalFinanceModal({ item, creditCardSummary, onClose, onSave }) {
       const isEditing = Boolean(item && item.id && !item.isPreset);
       const [type, setType] = useState(item?.type || "gasto");
       const [wallet, setWallet] = useState(item?.wallet ? item.wallet : (isEditing ? getPersonalWallet(item) : "Tarjeta"));
       const [category, setCategory] = useState(
-        item?.category || (item?.type === "ingreso" ? "Retiro de Ganancias" : PERSONAL_CATEGORIES[0])
+        item?.category ||
+        (item?.wallet === "Crédito"
+          ? (item?.type === "ingreso" ? "Pago / Abono Tarjeta de Crédito" : "Compras con Tarjeta de Crédito")
+          : (item?.type === "ingreso" ? "Retiro de Ganancias" : PERSONAL_CATEGORIES[0]))
       );
       const [description, setDescription] = useState(item?.description || "");
       const [amount, setAmount] = useState(item?.amount || "");
       const [date, setDate] = useState(item?.date || new Date().toISOString().slice(0, 10));
+
+      const isCredit = wallet === "Crédito";
+
+      const handleSelectWallet = (nextWallet) => {
+        setWallet(nextWallet);
+        if (nextWallet === "Crédito") {
+          setCategory(type === "ingreso" ? "Pago / Abono Tarjeta de Crédito" : "Compras con Tarjeta de Crédito");
+        }
+      };
+
+      const handleSelectType = (nextType) => {
+        setType(nextType);
+        if (wallet === "Crédito") {
+          setCategory(nextType === "ingreso" ? "Pago / Abono Tarjeta de Crédito" : "Compras con Tarjeta de Crédito");
+        }
+      };
+
+      const previewAvailableCredit = useMemo(() => {
+        if (!creditCardSummary || !isCredit) return null;
+        const amt = Math.max(0, Number(amount) || 0);
+        if (type === "gasto") {
+          return Math.max(0, creditCardSummary.availableCredit - amt);
+        }
+        return Math.min(creditCardSummary.totalLimit, creditCardSummary.availableCredit + amt);
+      }, [creditCardSummary, isCredit, amount, type]);
 
       const handleSubmit = (e) => {
         e.preventDefault();
@@ -3969,25 +4457,27 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
       return (
         <div style={styles.overlay} onClick={onClose}>
           <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
-            <h3 style={{ ...styles.modalTitle, color: "#E9D5FF" }}>
+            <h3 style={{ ...styles.modalTitle, color: isCredit ? "#FDE68A" : "#E9D5FF" }}>
               {isEditing
                 ? "Modificar Movimiento Personal"
+                : isCredit
+                ? (type === "gasto" ? "💎 Usar Tarjeta de Crédito (- Restar Cupo)" : "💎 Pagar / Abonar Tarjeta (+ Agregar Cupo)")
                 : `${type === "ingreso" ? "Agregar Dinero (+)" : "Restar / Registrar Gasto (-)"} en ${wallet === "Efectivo" ? "💵 Efectivo" : "💳 Tarjeta"}`}
             </h3>
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <label style={styles.inputLabel}>1. ¿Dónde quieres agregar o restar dinero?</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <label style={styles.inputLabel}>1. ¿Dónde quieres agregar o restar dinero / cupo?</label>
+                <div className="responsive-3col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                   <button
                     type="button"
                     style={{
                       ...styles.typeTabBtn,
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 8px",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "10px 6px",
                       ...(wallet === "Efectivo"
                         ? { background: "rgba(16, 185, 129, 0.22)", color: "#6EE7B7", borderColor: "rgba(52, 211, 153, 0.55)" }
                         : {})
                     }}
-                    onClick={() => setWallet("Efectivo")}
+                    onClick={() => handleSelectWallet("Efectivo")}
                   >
                     <span>💵 Efectivo</span>
                   </button>
@@ -3995,37 +4485,74 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                     type="button"
                     style={{
                       ...styles.typeTabBtn,
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 8px",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "10px 6px",
                       ...(wallet === "Tarjeta"
                         ? { background: "rgba(56, 189, 248, 0.22)", color: "#7DD3FC", borderColor: "rgba(56, 189, 248, 0.55)" }
                         : {})
                     }}
-                    onClick={() => setWallet("Tarjeta")}
+                    onClick={() => handleSelectWallet("Tarjeta")}
                   >
-                    <span>💳 Dinero en Tarjeta</span>
+                    <span>💳 T. Débito</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.typeTabBtn,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "10px 6px",
+                      ...(wallet === "Crédito"
+                        ? { background: "rgba(245, 158, 11, 0.24)", color: "#FDE68A", borderColor: "rgba(251, 191, 36, 0.65)" }
+                        : {})
+                    }}
+                    onClick={() => handleSelectWallet("Crédito")}
+                  >
+                    <span>💎 T. Crédito (Cupo)</span>
                   </button>
                 </div>
               </div>
 
               <div>
-                <label style={styles.inputLabel}>2. Acción a Realizar</label>
+                <label style={styles.inputLabel}>
+                  {isCredit ? "2. ¿Usaste la tarjeta o hiciste un pago/abono de cupo?" : "2. Acción a Realizar"}
+                </label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <button
                     type="button"
-                    style={{ ...styles.typeTabBtn, padding: "10px 8px", ...(type === "ingreso" ? styles.typeTabActiveGreen : {}) }}
-                    onClick={() => setType("ingreso")}
+                    style={{ ...styles.typeTabBtn, padding: "10px 8px", ...(type === "gasto" ? styles.typeTabActiveRed : {}) }}
+                    onClick={() => handleSelectType("gasto")}
                   >
-                    + Agregar (Ingreso)
+                    {isCredit ? "- Usar Tarjeta (Restar Cupo)" : "- Restar (Gasto)"}
                   </button>
                   <button
                     type="button"
-                    style={{ ...styles.typeTabBtn, padding: "10px 8px", ...(type === "gasto" ? styles.typeTabActiveRed : {}) }}
-                    onClick={() => setType("gasto")}
+                    style={{ ...styles.typeTabBtn, padding: "10px 8px", ...(type === "ingreso" ? styles.typeTabActiveGreen : {}) }}
+                    onClick={() => handleSelectType("ingreso")}
                   >
-                    - Restar (Gasto)
+                    {isCredit ? "+ Pagar / Liberar Cupo" : "+ Agregar (Ingreso)"}
                   </button>
                 </div>
               </div>
+
+              {isCredit && creditCardSummary && (
+                <div style={{
+                  background: "rgba(245, 158, 11, 0.1)",
+                  border: "1px solid rgba(251, 191, 36, 0.35)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  fontSize: 12
+                }}>
+                  <span style={{ color: "#FEF3C7" }}>
+                    Cupo actual: <strong>{money(creditCardSummary.availableCredit)}</strong>
+                  </span>
+                  <span style={{ color: type === "gasto" ? "#FCA5A5" : "#6EE7B7", fontWeight: 700 }}>
+                    Nuevo cupo disponible: {money(previewAvailableCredit)}
+                  </span>
+                </div>
+              )}
 
               <div>
                 <label style={styles.inputLabel}>Categoría Personal</label>
@@ -4036,13 +4563,22 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
 
               <div>
                 <label style={styles.inputLabel}>Concepto o Descripción</label>
-                <input style={styles.glassInput} value={description} onChange={e => setDescription(e.target.value)} placeholder={`Ej: ${type === "ingreso" ? "Abono, retiro o vuelto en " + wallet.toLowerCase() : "Compra o pago con " + wallet.toLowerCase()}`} />
+                <input
+                  style={styles.glassInput}
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder={
+                    isCredit
+                      ? (type === "gasto" ? "Ej: Compra supermercado / cuotas con tarjeta de crédito" : "Ej: Pago estado de cuenta / abono cupo tarjeta")
+                      : `Ej: ${type === "ingreso" ? "Abono, retiro o vuelto en " + wallet.toLowerCase() : "Compra o pago con " + wallet.toLowerCase()}`
+                  }
+                />
               </div>
 
               <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={styles.inputLabel}>Monto ($)</label>
-                  <input style={styles.glassInput} type="number" min="1" placeholder="Ej: 15000" value={amount} onChange={e => setAmount(e.target.value)} required />
+                  <input style={styles.glassInput} type="number" min="1" placeholder="Ej: 25000" value={amount} onChange={e => setAmount(e.target.value)} required />
                 </div>
                 <div>
                   <label style={styles.inputLabel}>Fecha</label>
@@ -4052,8 +4588,159 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
                 <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
-                <button type="submit" style={styles.purpleBtn}>
-                  {isEditing ? "Guardar Cambios" : `${type === "ingreso" ? "+ Agregar a " : "- Restar de "}${wallet}`}
+                <button type="submit" style={isCredit ? styles.amberBtn : styles.purpleBtn}>
+                  {isEditing
+                    ? "Guardar Cambios"
+                    : isCredit
+                    ? (type === "gasto" ? "- Restar del Cupo Disponible" : "+ Agregar al Cupo Disponible")
+                    : `${type === "ingreso" ? "+ Agregar a " : "- Restar de "}${wallet}`}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function CreditCardConfigModal({ creditCardSummary, onClose, onSave }) {
+      const [cardName, setCardName] = useState(creditCardSummary?.cardName || "Tarjeta de Crédito Principal");
+      const [totalLimit, setTotalLimit] = useState(creditCardSummary?.totalLimit ?? 1000000);
+      const [availableInput, setAvailableInput] = useState(creditCardSummary?.availableCredit ?? 1000000);
+      const [paymentDay, setPaymentDay] = useState(creditCardSummary?.paymentDay ?? 5);
+      const [billingDay, setBillingDay] = useState(creditCardSummary?.billingDay ?? 25);
+
+      const handleTotalLimitChange = (val) => {
+        const nextTotal = Math.max(0, Number(val) || 0);
+        const currentUsed = Math.max(0, Number(totalLimit || 0) - Number(availableInput || 0));
+        setTotalLimit(val);
+        setAvailableInput(Math.max(0, nextTotal - currentUsed));
+      };
+
+      const computedUsed = Math.max(0, (Number(totalLimit) || 0) - (Number(availableInput) || 0));
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        const cleanLimit = Math.max(0, Number(totalLimit) || 0);
+        const cleanAvail = Math.min(cleanLimit, Math.max(0, Number(availableInput) || 0));
+        const targetUsed = Math.max(0, cleanLimit - cleanAvail);
+        const netMovementsUsed = (Number(creditCardSummary?.usedFromPurchases) || 0) - (Number(creditCardSummary?.freedFromPayments) || 0);
+        const calibratedBaseUsed = targetUsed - netMovementsUsed;
+
+        onSave({
+          cardName: sanitizeText(cardName) || "Tarjeta de Crédito Principal",
+          totalLimit: cleanLimit,
+          baseUsed: calibratedBaseUsed,
+          paymentDay: Math.min(31, Math.max(1, Number(paymentDay) || 5)),
+          billingDay: Math.min(31, Math.max(1, Number(billingDay) || 25))
+        });
+      };
+
+      return (
+        <div style={styles.overlay} onClick={onClose}>
+          <div className="responsive-modal" style={styles.glassModal} onClick={e => e.stopPropagation()}>
+            <h3 style={{ ...styles.modalTitle, color: "#FDE68A", display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="credit-card" size={19} color="#FBBF24" />
+              <span>Configurar Cupo y Días de Pago • Tarjeta de Crédito</span>
+            </h3>
+            <p style={{ color: "#CBD5E1", fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
+              Ajusta tu cupo total, el cupo disponible que te queda hoy y el día de pago mensual. Cada compra o abono actualizará este saldo automáticamente en todos tus dispositivos.
+            </p>
+
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={styles.inputLabel}>Nombre / Banco de la Tarjeta</label>
+                <input
+                  style={styles.glassInput}
+                  value={cardName}
+                  onChange={e => setCardName(e.target.value)}
+                  placeholder="Ej: Visa Banco de Chile / CMR / Santander"
+                  required
+                />
+              </div>
+
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ ...styles.inputLabel, color: "#FDE68A" }}>Cupo Total de la Tarjeta ($)</label>
+                  <input
+                    style={styles.glassInput}
+                    type="number"
+                    min="0"
+                    value={totalLimit}
+                    onChange={e => handleTotalLimitChange(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={{ ...styles.inputLabel, color: "#6EE7B7" }}>Cupo Disponible Actual ($)</label>
+                  <input
+                    style={styles.glassInput}
+                    type="number"
+                    min="0"
+                    max={Math.max(0, Number(totalLimit) || 0)}
+                    value={availableInput}
+                    onChange={e => setAvailableInput(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div style={{
+                background: "rgba(15, 23, 42, 0.65)",
+                border: "1px solid rgba(251, 191, 36, 0.3)",
+                borderRadius: 10,
+                padding: "10px 14px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 8,
+                fontSize: 12.5
+              }}>
+                <span style={{ color: "#CBD5E1" }}>
+                  Cupo Utilizado / Deuda Calculada: <strong style={{ color: "#F87171" }}>{money(computedUsed)}</strong>
+                </span>
+                <span style={{ color: "#34D399", fontWeight: 700 }}>
+                  Cupo Disponible: {money(availableInput)}
+                </span>
+              </div>
+
+              <div className="responsive-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={styles.inputLabel}>Día de Pago Mensual (1 al 31)</label>
+                  <input
+                    style={styles.glassInput}
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={paymentDay}
+                    onChange={e => setPaymentDay(e.target.value)}
+                    required
+                  />
+                  <span style={{ fontSize: 10.5, color: "#94A3B8", display: "block", marginTop: 3 }}>
+                    Día límite para pagar cada mes
+                  </span>
+                </div>
+                <div>
+                  <label style={styles.inputLabel}>Día de Facturación / Corte (1 al 31)</label>
+                  <input
+                    style={styles.glassInput}
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={billingDay}
+                    onChange={e => setBillingDay(e.target.value)}
+                    required
+                  />
+                  <span style={{ fontSize: 10.5, color: "#94A3B8", display: "block", marginTop: 3 }}>
+                    Día en que cierra el estado de cuenta
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+                <button type="button" style={styles.secondaryBtn} onClick={onClose}>Cancelar</button>
+                <button type="submit" style={styles.amberBtn}>
+                  <Icon name="check" size={14} /> Guardar Cupo y Fechas
                 </button>
               </div>
             </form>
@@ -4738,6 +5425,7 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
 
       walletBadgeCash: { background: "rgba(16, 185, 129, 0.16)", color: "#6EE7B7", border: "1px solid rgba(52, 211, 153, 0.3)", padding: "2px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 600 },
       walletBadgeCard: { background: "rgba(56, 189, 248, 0.16)", color: "#7DD3FC", border: "1px solid rgba(56, 189, 248, 0.3)", padding: "2px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 600 },
+      walletBadgeCredit: { background: "rgba(245, 158, 11, 0.18)", color: "#FDE68A", border: "1px solid rgba(251, 191, 36, 0.4)", padding: "2px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 600 },
       walletPlusBtn: {
         background: "rgba(16, 185, 129, 0.16)",
         border: "1px solid rgba(52, 211, 153, 0.35)",
