@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Almacén PRO" />
   <meta name="mobile-web-app-capable" content="yes" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <!-- Favicon / Logo de la pestaña -->
   <link rel="icon" type="image/png" href="logo.png" />
   <link rel="apple-touch-icon" href="logo.png" />
@@ -314,6 +317,13 @@
     const PRODUCT_CATEGORIES = ["Ropa", "Bazar", "Accesorios", "Calzado", "Electrónica", "Hogar", "Alimentos", "Otros"];
 
     // ============ NORMALIZADORES Y ADAPTADORES MULTIFORMATO SUPABASE ============
+    const DEVICE_ID = "dev-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36);
+    const schemaFormatCache = {
+      productos: null,
+      ventas: null,
+      finanzas_personales: null
+    };
+
     const getSyncTracker = () => {
       try {
         const raw = JSON.parse(localStorage.getItem(SYNC_TRACKER_KEY) || "{}");
@@ -322,10 +332,11 @@
           deletedIds: raw.deletedIds || {},
           dirtyIds: raw.dirtyIds || {},
           initialized: Boolean(raw.initialized),
-          lastSyncAt: raw.lastSyncAt || null
+          lastSyncAt: raw.lastSyncAt || null,
+          lastCloudUpdatedAt: Number(raw.lastCloudUpdatedAt || 0)
         };
       } catch (e) {
-        return { syncedIds: {}, deletedIds: {}, dirtyIds: {}, initialized: false, lastSyncAt: null };
+        return { syncedIds: {}, deletedIds: {}, dirtyIds: {}, initialized: false, lastSyncAt: null, lastCloudUpdatedAt: 0 };
       }
     };
 
@@ -419,64 +430,88 @@
     async function upsertProductToSupabase(prod) {
       if (!supabase) return { error: null };
       const clean = normalizeProduct(prod);
-      let res = await supabase.from("productos").upsert([clean]);
-      if (!res.error) return res;
-
       const { barcode, ...noBarcode } = clean;
-      res = await supabase.from("productos").upsert([noBarcode]);
-      if (!res.error) return res;
-
       const lower = {
         id: clean.id, name: clean.name, category: clean.category, sku: clean.sku, barcode: clean.barcode,
         costprice: clean.costPrice, saleprice: clean.salePrice, minstock: clean.minStock, stockbylocation: clean.stockByLocation
       };
-      res = await supabase.from("productos").upsert([lower]);
-      if (!res.error) return res;
-
       const { barcode: _b2, ...lowerNoBarcode } = lower;
-      res = await supabase.from("productos").upsert([lowerNoBarcode]);
-      if (!res.error) return res;
-
       const snake = {
         id: clean.id, name: clean.name, category: clean.category, sku: clean.sku, barcode: clean.barcode,
         cost_price: clean.costPrice, sale_price: clean.salePrice, min_stock: clean.minStock, stock_by_location: clean.stockByLocation
       };
-      res = await supabase.from("productos").upsert([snake]);
-      if (!res.error) return res;
-
       const { barcode: _b3, ...snakeNoBarcode } = snake;
-      return await supabase.from("productos").upsert([snakeNoBarcode]);
+
+      const variants = [clean, noBarcode, lower, lowerNoBarcode, snake, snakeNoBarcode];
+      if (schemaFormatCache.productos !== null && variants[schemaFormatCache.productos]) {
+        const cachedRes = await supabase.from("productos").upsert([variants[schemaFormatCache.productos]]);
+        if (!cachedRes.error) return cachedRes;
+      }
+
+      let lastRes = { error: null };
+      for (let i = 0; i < variants.length; i++) {
+        if (i === schemaFormatCache.productos) continue;
+        lastRes = await supabase.from("productos").upsert([variants[i]]);
+        if (!lastRes.error) {
+          schemaFormatCache.productos = i;
+          return lastRes;
+        }
+      }
+      return lastRes;
     }
 
     async function upsertSaleToSupabase(sale) {
       if (!supabase) return { error: null };
       const clean = normalizeSale(sale);
-      let res = await supabase.from("ventas").upsert([clean]);
-      if (!res.error) return res;
-
       const lower = {
         id: clean.id, date: clean.date, customername: clean.customerName,
         paymentmethod: clean.paymentMethod, total: clean.total, details: clean.details
       };
-      res = await supabase.from("ventas").upsert([lower]);
-      if (!res.error) return res;
-
       const snake = {
         id: clean.id, date: clean.date, customer_name: clean.customerName,
         payment_method: clean.paymentMethod, total: clean.total, details: clean.details
       };
-      return await supabase.from("ventas").upsert([snake]);
+      const variants = [clean, lower, snake];
+
+      if (schemaFormatCache.ventas !== null && variants[schemaFormatCache.ventas]) {
+        const cachedRes = await supabase.from("ventas").upsert([variants[schemaFormatCache.ventas]]);
+        if (!cachedRes.error) return cachedRes;
+      }
+
+      let lastRes = { error: null };
+      for (let i = 0; i < variants.length; i++) {
+        if (i === schemaFormatCache.ventas) continue;
+        lastRes = await supabase.from("ventas").upsert([variants[i]]);
+        if (!lastRes.error) {
+          schemaFormatCache.ventas = i;
+          return lastRes;
+        }
+      }
+      return lastRes;
     }
 
     async function upsertPersonalFinanceToSupabase(item) {
       if (!supabase) return { error: null };
       const clean = normalizePersonalFinance(item);
-      const res = await supabase.from("finanzas_personales").upsert([clean]);
-      if (!res.error) return res;
-
       const { wallet, ...fallback } = clean;
       const prefixedDesc = `[${wallet || "Tarjeta"}] ${clean.description || ""}`.trim();
-      return await supabase.from("finanzas_personales").upsert([{ ...fallback, description: prefixedDesc }]);
+      const variants = [clean, { ...fallback, description: prefixedDesc }];
+
+      if (schemaFormatCache.finanzas_personales !== null && variants[schemaFormatCache.finanzas_personales]) {
+        const cachedRes = await supabase.from("finanzas_personales").upsert([variants[schemaFormatCache.finanzas_personales]]);
+        if (!cachedRes.error) return cachedRes;
+      }
+
+      let lastRes = { error: null };
+      for (let i = 0; i < variants.length; i++) {
+        if (i === schemaFormatCache.finanzas_personales) continue;
+        lastRes = await supabase.from("finanzas_personales").upsert([variants[i]]);
+        if (!lastRes.error) {
+          schemaFormatCache.finanzas_personales = i;
+          return lastRes;
+        }
+      }
+      return lastRes;
     }
 
     async function upsertExpenseToSupabase(exp) {
@@ -550,12 +585,12 @@
         }
       }, []);
 
-      const [users, setUsers] = useState(() => (cachedData?.users || initialUsers).map(normalizeUser));
-      const [products, setProducts] = useState(() => (cachedData?.products || initialMockProducts).map(normalizeProduct));
-      const [sales, setSales] = useState(() => (cachedData?.sales || initialMockSales).map(normalizeSale));
-      const [expenses, setExpenses] = useState(() => (cachedData?.expenses || initialMockExpenses).filter(e => e.id !== META_SYNC_ID).map(normalizeExpense));
-      const [customers, setCustomers] = useState(() => (cachedData?.customers || initialMockCustomers).filter(c => c.id !== META_SYNC_ID).map(normalizeCustomer));
-      const [personalFinances, setPersonalFinances] = useState(() => (cachedData?.personalFinances || initialPersonalFinances).map(normalizePersonalFinance));
+      const [users, setUsers] = useState(() => (cachedData?.users || initialUsers).filter(u => u && u.id !== META_SYNC_ID).map(normalizeUser));
+      const [products, setProducts] = useState(() => (cachedData?.products || initialMockProducts).filter(p => p && p.id !== META_SYNC_ID).map(normalizeProduct));
+      const [sales, setSales] = useState(() => (cachedData?.sales || initialMockSales).filter(s => s && s.id !== META_SYNC_ID).map(normalizeSale));
+      const [expenses, setExpenses] = useState(() => (cachedData?.expenses || initialMockExpenses).filter(e => e && e.id !== META_SYNC_ID).map(normalizeExpense));
+      const [customers, setCustomers] = useState(() => (cachedData?.customers || initialMockCustomers).filter(c => c && c.id !== META_SYNC_ID).map(normalizeCustomer));
+      const [personalFinances, setPersonalFinances] = useState(() => (cachedData?.personalFinances || initialPersonalFinances).filter(pf => pf && pf.id !== META_SYNC_ID).map(normalizePersonalFinance));
 
       const [rolePermissions, setRolePermissions] = useState(() => {
         try {
@@ -591,6 +626,12 @@
       useEffect(() => {
         stateRef.current = { users, products, sales, expenses, customers, personalFinances, rolePermissions };
       }, [users, products, sales, expenses, customers, personalFinances, rolePermissions]);
+
+      const activeSavesCountRef = useRef(0);
+      const lastSaveFinishedAtRef = useRef(0);
+      const localUpdatedAtRef = useRef(getSyncTracker().lastCloudUpdatedAt || 0);
+      const realtimeChannelRef = useRef(null);
+      const localBroadcastRef = useRef(null);
 
       useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 860);
@@ -644,47 +685,139 @@
         try { localStorage.setItem(PERMS_STORAGE_KEY, JSON.stringify(rolePermissions)); } catch (e) {}
       }, [rolePermissions]);
 
-      // Guarda un espejo compacto del estado completo en una fila de sistema para respaldar columnas/tablas faltantes y permisos
-      const saveCloudSnapshot = useCallback(async (overrideState = {}) => {
+      // Aplica instantáneamente un snapshot recibido por Broadcast (entre dispositivos o pestañas)
+      const applyCloudSnapshotPayload = useCallback((payload) => {
+        if (!payload || typeof payload !== "object") return;
+        if (payload.deviceId && payload.deviceId === DEVICE_ID) return;
+        if (activeSavesCountRef.current > 0) return;
+        const incomingTs = Number(payload.updatedAt || 0);
+        if (incomingTs > 0 && incomingTs < localUpdatedAtRef.current) return;
+
+        localUpdatedAtRef.current = Math.max(localUpdatedAtRef.current, incomingTs || Date.now());
+        const tracker = getSyncTracker();
+        const mergedDeleted = { ...(tracker.deletedIds || {}), ...(payload.deletedIds || {}) };
+
+        if (Array.isArray(payload.users)) {
+          const uList = payload.users.filter(u => u && u.id !== META_SYNC_ID && !mergedDeleted[u.id]).map(normalizeUser);
+          const uMap = new Map(uList.map(u => [u.email.toLowerCase(), u]));
+          initialUsers.forEach(iu => {
+            if (!uMap.has(iu.email.toLowerCase())) uList.push(normalizeUser(iu));
+          });
+          setUsers(uList);
+        }
+        if (Array.isArray(payload.products)) {
+          setProducts(payload.products.filter(p => p && p.id !== META_SYNC_ID && !mergedDeleted[p.id]).map(normalizeProduct));
+        }
+        if (Array.isArray(payload.sales)) {
+          const sList = payload.sales.filter(s => s && s.id !== META_SYNC_ID && !mergedDeleted[s.id]).map(normalizeSale);
+          sList.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+          setSales(sList);
+        }
+        if (Array.isArray(payload.expenses)) {
+          const eList = payload.expenses.filter(e => e && e.id !== META_SYNC_ID && !mergedDeleted[e.id]).map(normalizeExpense);
+          eList.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+          setExpenses(eList);
+        }
+        if (Array.isArray(payload.customers)) {
+          setCustomers(payload.customers.filter(c => c && c.id !== META_SYNC_ID && !mergedDeleted[c.id]).map(normalizeCustomer));
+        }
+        if (Array.isArray(payload.personalFinances)) {
+          const pfList = payload.personalFinances.filter(pf => pf && pf.id !== META_SYNC_ID && !mergedDeleted[pf.id]).map(normalizePersonalFinance);
+          pfList.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+          setPersonalFinances(pfList);
+        }
+        if (payload.rolePermissions) {
+          setRolePermissions(prev => ({ ...defaultRolePermissions, ...prev, ...payload.rolePermissions }));
+        }
+
+        const nowStr = new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        saveSyncTracker(prev => ({
+          ...prev,
+          deletedIds: mergedDeleted,
+          dirtyIds: {},
+          initialized: true,
+          lastSyncAt: nowStr,
+          lastCloudUpdatedAt: localUpdatedAtRef.current
+        }));
+        setSyncStatus(prev => ({ ...prev, state: "ok", lastSync: nowStr, error: null }));
+      }, []);
+
+      // Guarda un espejo autoritativo del estado completo en Supabase y lo transmite en vivo a otros dispositivos
+      const saveCloudSnapshot = useCallback(async (overrideState = {}, deletedOverride = null) => {
         if (!supabase) return;
         try {
           const tracker = getSyncTracker();
+          const mergedDeleted = deletedOverride || tracker.deletedIds || {};
           const current = { ...stateRef.current, ...overrideState };
+          stateRef.current = current;
+
+          const nextUpdatedAt = Math.max(Date.now(), (localUpdatedAtRef.current || 0) + 1);
+          localUpdatedAtRef.current = nextUpdatedAt;
+
           const payload = {
-            updatedAt: Date.now(),
-            deletedIds: tracker.deletedIds || {},
+            updatedAt: nextUpdatedAt,
+            deviceId: DEVICE_ID,
+            deletedIds: mergedDeleted,
             rolePermissions: current.rolePermissions,
-            products: (current.products || []).map(normalizeProduct),
-            sales: (current.sales || []).map(normalizeSale),
-            expenses: (current.expenses || []).filter(e => e.id !== META_SYNC_ID).map(normalizeExpense),
-            customers: (current.customers || []).filter(c => c.id !== META_SYNC_ID).map(normalizeCustomer),
-            personalFinances: (current.personalFinances || []).map(normalizePersonalFinance),
-            users: (current.users || []).map(normalizeUser)
+            products: (current.products || []).filter(p => p && p.id !== META_SYNC_ID).map(normalizeProduct),
+            sales: (current.sales || []).filter(s => s && s.id !== META_SYNC_ID).map(normalizeSale),
+            expenses: (current.expenses || []).filter(e => e && e.id !== META_SYNC_ID).map(normalizeExpense),
+            customers: (current.customers || []).filter(c => c && c.id !== META_SYNC_ID).map(normalizeCustomer),
+            personalFinances: (current.personalFinances || []).filter(pf => pf && pf.id !== META_SYNC_ID).map(normalizePersonalFinance),
+            users: (current.users || []).filter(u => u && u.id !== META_SYNC_ID).map(normalizeUser)
           };
-          const serialized = JSON.stringify(payload);
-          const cRes = await supabase.from("clientes").upsert([{ id: META_SYNC_ID, name: "__sync_v2__", phone: serialized }]);
-          if (cRes.error) {
-            await supabase.from("gastos").upsert([{ id: META_SYNC_ID, date: "1970-01-01", category: "__sync_v2__", description: serialized, amount: 0 }]);
+
+          const nowStr = new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          saveSyncTracker(prev => ({
+            ...prev,
+            deletedIds: mergedDeleted,
+            lastSyncAt: nowStr,
+            lastCloudUpdatedAt: nextUpdatedAt
+          }));
+
+          // Transmisión instantánea por WebSocket (Supabase Broadcast) y entre pestañas locales
+          if (realtimeChannelRef.current) {
+            try {
+              realtimeChannelRef.current.send({
+                type: "broadcast",
+                event: "cloud_state_update",
+                payload
+              });
+            } catch (e) {}
           }
+          if (localBroadcastRef.current) {
+            try { localBroadcastRef.current.postMessage(payload); } catch (e) {}
+          }
+
+          const serialized = JSON.stringify(payload);
+          const [cSnap, eSnap] = await Promise.all([
+            supabase.from("clientes").upsert([{ id: META_SYNC_ID, name: "__sync_v2__", phone: serialized }]),
+            supabase.from("gastos").upsert([{ id: META_SYNC_ID, date: "1970-01-01", category: "__sync_v2__", description: serialized, amount: 0 }])
+          ]);
+          if (cSnap.error && eSnap.error) {
+            await supabase.from("ventas").upsert([{ id: META_SYNC_ID, date: "1970-01-01", customerName: "__sync_v2__", paymentMethod: "Sync", total: 0, details: serialized }]);
+          }
+          setSyncStatus(prev => ({ ...prev, state: "ok", lastSync: nowStr, error: null }));
         } catch (e) {}
       }, []);
 
       // Subida completa de todos los datos locales de este PC hacia Supabase
       const pushAllLocalDataToSupabase = useCallback(async (silent = false) => {
         if (!supabase) return false;
+        activeSavesCountRef.current += 1;
         setIsSyncing(true);
         try {
           const current = stateRef.current;
+          await saveCloudSnapshot(current);
+
           const results = await Promise.all([
-            Promise.all((current.users || []).map(u => upsertUserToSupabase(u))),
-            Promise.all((current.products || []).map(p => upsertProductToSupabase(p))),
-            Promise.all((current.sales || []).map(s => upsertSaleToSupabase(s))),
+            Promise.all((current.users || []).filter(u => u.id !== META_SYNC_ID).map(u => upsertUserToSupabase(u))),
+            Promise.all((current.products || []).filter(p => p.id !== META_SYNC_ID).map(p => upsertProductToSupabase(p))),
+            Promise.all((current.sales || []).filter(s => s.id !== META_SYNC_ID).map(s => upsertSaleToSupabase(s))),
             Promise.all((current.expenses || []).filter(e => e.id !== META_SYNC_ID).map(e => upsertExpenseToSupabase(e))),
             Promise.all((current.customers || []).filter(c => c.id !== META_SYNC_ID).map(c => upsertCustomerToSupabase(c))),
-            Promise.all((current.personalFinances || []).map(pf => upsertPersonalFinanceToSupabase(pf)))
+            Promise.all((current.personalFinances || []).filter(pf => pf.id !== META_SYNC_ID).map(pf => upsertPersonalFinanceToSupabase(pf)))
           ]);
-
-          await saveCloudSnapshot(current);
 
           const allIds = {};
           [
@@ -694,7 +827,7 @@
             ...(current.expenses || []),
             ...(current.customers || []),
             ...(current.personalFinances || [])
-          ].forEach(item => { if (item?.id) allIds[item.id] = true; });
+          ].forEach(item => { if (item?.id && item.id !== META_SYNC_ID) allIds[item.id] = true; });
 
           const nowStr = new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
           saveSyncTracker(prev => ({
@@ -702,7 +835,8 @@
             syncedIds: { ...(prev.syncedIds || {}), ...allIds },
             dirtyIds: {},
             initialized: true,
-            lastSyncAt: nowStr
+            lastSyncAt: nowStr,
+            lastCloudUpdatedAt: localUpdatedAtRef.current
           }));
 
           const firstErr = results.flat().find(r => r && r.error)?.error;
@@ -721,12 +855,18 @@
           if (!silent) notify("Error al subir datos a la nube", "warn");
           return false;
         } finally {
+          activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+          lastSaveFinishedAtRef.current = Date.now();
           setIsSyncing(false);
         }
       }, [notify, saveCloudSnapshot]);
 
       const fetchDataFromSupabase = useCallback(async (silent = false, forcePullOnly = false) => {
         if (!supabase) return;
+        // Evitar que un sondeo en segundo plano pise un guardado local en curso o recién terminado
+        if (silent && !forcePullOnly && (activeSavesCountRef.current > 0 || Date.now() - lastSaveFinishedAtRef.current < 2500)) {
+          return;
+        }
         setIsSyncing(true);
         try {
           const [uRes, pRes, sRes, eRes, cRes, pfRes] = await Promise.all([
@@ -738,22 +878,46 @@
             supabase.from("finanzas_personales").select("*")
           ]);
 
+          // Si el usuario guardó algo mientras esta consulta viajaba por red, abortar lectura antigua
+          if (silent && !forcePullOnly && activeSavesCountRef.current > 0) {
+            return;
+          }
+
           const tableStatus = {
-            usuarios: uRes.error ? uRes.error.message : `OK (${(uRes.data || []).length})`,
-            productos: pRes.error ? pRes.error.message : `OK (${(pRes.data || []).length})`,
-            ventas: sRes.error ? sRes.error.message : `OK (${(sRes.data || []).length})`,
+            usuarios: uRes.error ? uRes.error.message : `OK (${(uRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`,
+            productos: pRes.error ? pRes.error.message : `OK (${(pRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`,
+            ventas: sRes.error ? sRes.error.message : `OK (${(sRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`,
             gastos: eRes.error ? eRes.error.message : `OK (${(eRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`,
             clientes: cRes.error ? cRes.error.message : `OK (${(cRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`,
-            finanzas_personales: pfRes.error ? pfRes.error.message : `OK (${(pfRes.data || []).length})`
+            finanzas_personales: pfRes.error ? pfRes.error.message : `OK (${(pfRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`
           };
 
-          // Buscar fila de espejo global (__almacen_sync_meta_v2__) en clientes o gastos
+          // Buscar el espejo global (__almacen_sync_meta_v2__) más reciente entre todas las tablas disponibles
+          const metaCandidates = [
+            (cRes.data || []).find(r => r.id === META_SYNC_ID)?.phone,
+            (eRes.data || []).find(r => r.id === META_SYNC_ID)?.description,
+            (sRes.data || []).find(r => r.id === META_SYNC_ID)?.details,
+            (pfRes.data || []).find(r => r.id === META_SYNC_ID)?.description
+          ].filter(Boolean);
+
           let cloudMeta = null;
-          const metaRowCust = (cRes.data || []).find(r => r.id === META_SYNC_ID);
-          const metaRowExp = (eRes.data || []).find(r => r.id === META_SYNC_ID);
-          const rawMetaStr = metaRowCust?.phone || metaRowExp?.description;
-          if (rawMetaStr) {
-            try { cloudMeta = JSON.parse(rawMetaStr); } catch (e) {}
+          metaCandidates.forEach(rawStr => {
+            try {
+              const parsed = JSON.parse(rawStr);
+              if (parsed && typeof parsed === "object") {
+                if (!cloudMeta || Number(parsed.updatedAt || 0) >= Number(cloudMeta.updatedAt || 0)) {
+                  cloudMeta = parsed;
+                }
+              }
+            } catch (e) {}
+          });
+
+          const hasCloudMeta = Boolean(
+            cloudMeta && (Array.isArray(cloudMeta.products) || Array.isArray(cloudMeta.sales) || Array.isArray(cloudMeta.personalFinances))
+          );
+
+          if (hasCloudMeta && Number(cloudMeta.updatedAt || 0) > localUpdatedAtRef.current) {
+            localUpdatedAtRef.current = Number(cloudMeta.updatedAt);
           }
 
           const tracker = getSyncTracker();
@@ -769,29 +933,26 @@
               ? metaFallbackList.filter(r => r && r.id !== META_SYNC_ID).map(normalizer)
               : [];
 
-            const metaById = new Map(metaNormalized.map(item => [item.id, item]));
             const remoteById = new Map();
 
-            // Combinar filas de la tabla con metadatos del espejo (para recuperar campos como barcode, wallet o stockByLocation si faltaban columnas)
+            // 1. Cargar filas de la tabla SQL individual
             remoteNormalized.forEach(item => {
-              const fromMeta = metaById.get(item.id);
-              remoteById.set(item.id, fromMeta ? { ...fromMeta, ...item, barcode: item.barcode || fromMeta.barcode || "", wallet: item.wallet || fromMeta.wallet } : item);
-            });
-
-            // Si la tabla individual falló o está vacía pero el espejo tiene datos, usar los del espejo
-            if (remoteById.size === 0 && metaById.size > 0) {
-              metaById.forEach((val, key) => remoteById.set(key, val));
-            }
-
-            const initialById = new Map((initialMockList || []).map(i => [i.id, normalizer(i)]));
-            const resultById = new Map();
-            const toUpload = [];
-
-            remoteById.forEach((item, id) => {
-              if (!mergedDeletedIds[id]) {
-                resultById.set(id, item);
+              if (!mergedDeletedIds[item.id]) {
+                remoteById.set(item.id, item);
               }
             });
+
+            // 2. Superponer datos completos del espejo autoritativo (cloudMeta conserva todos los campos intactos)
+            metaNormalized.forEach(metaItem => {
+              if (!mergedDeletedIds[metaItem.id]) {
+                const fromTable = remoteById.get(metaItem.id);
+                remoteById.set(metaItem.id, fromTable ? { ...fromTable, ...metaItem } : metaItem);
+              }
+            });
+
+            const initialById = new Map((initialMockList || []).map(i => [i.id, normalizer(i)]));
+            const resultById = new Map(remoteById);
+            const toUpload = [];
 
             if (!forcePullOnly) {
               (localList || []).forEach(rawLocal => {
@@ -800,18 +961,17 @@
                 const id = localItem.id;
                 if (mergedDeletedIds[id]) return;
 
+                // Solo sobrescribir la nube si este dispositivo modificó explícitamente el registro (dirtyIds)
                 if (dirtyIds[id]) {
                   resultById.set(id, localItem);
                   toUpload.push(localItem);
                   return;
                 }
 
-                if (!remoteById.has(id)) {
+                // Si aún no existe espejo en la nube (primera sincronización del proyecto), incorporar datos locales
+                if (!hasCloudMeta && !remoteById.has(id)) {
                   const wasAlreadySynced = Boolean(tracker.syncedIds?.[id]);
-                  if (wasAlreadySynced) {
-                    // Fue eliminado en otro dispositivo
-                    return;
-                  }
+                  if (wasAlreadySynced) return;
                   const initItem = initialById.get(id);
                   const isUntouchedMock = initItem && JSON.stringify(initItem) === JSON.stringify(localItem);
                   if (!isUntouchedMock || remoteById.size === 0) {
@@ -823,7 +983,7 @@
             }
 
             let finalArr = Array.from(resultById.values());
-            if (finalArr.length === 0 && remoteById.size === 0 && Object.keys(mergedDeletedIds).length === 0) {
+            if (finalArr.length === 0 && remoteById.size === 0 && !hasCloudMeta && Object.keys(mergedDeletedIds).length === 0) {
               finalArr = (localList && localList.length > 0 ? localList : initialMockList).map(normalizer);
               finalArr.forEach(item => toUpload.push(item));
             }
@@ -842,7 +1002,6 @@
             if (!userMap.has(iu.email.toLowerCase())) {
               const normU = normalizeUser(iu);
               uMerged.list.push(normU);
-              uMerged.toUpload.push(normU);
             }
           });
 
@@ -876,41 +1035,42 @@
             deletedIds: mergedDeletedIds,
             dirtyIds: {},
             initialized: true,
-            lastSyncAt: nowStr
+            lastSyncAt: nowStr,
+            lastCloudUpdatedAt: localUpdatedAtRef.current
           });
 
-          // Si había cambios locales pendientes o datos en este PC que aún no estaban en Supabase, subirlos automáticamente
+          // Subir únicamente si había cambios locales pendientes (dirtyIds) o si la nube aún no tenía espejo inicial
           const totalToUpload =
             uMerged.toUpload.length + pMerged.toUpload.length + sMerged.toUpload.length +
             eMerged.toUpload.length + cMerged.toUpload.length + pfMerged.toUpload.length;
 
-          if (totalToUpload > 0 && !forcePullOnly) {
+          if (!forcePullOnly && (totalToUpload > 0 || !hasCloudMeta)) {
             await Promise.all([
               ...uMerged.toUpload.map(u => upsertUserToSupabase(u)),
               ...pMerged.toUpload.map(p => upsertProductToSupabase(p)),
               ...sMerged.toUpload.map(s => upsertSaleToSupabase(s)),
               ...eMerged.toUpload.map(e => upsertExpenseToSupabase(e)),
               ...cMerged.toUpload.map(c => upsertCustomerToSupabase(c)),
-              ...pfMerged.toUpload.map(pf => upsertPersonalFinanceToSupabase(pf))
+              ...pfMerged.toUpload.map(pf => upsertPersonalFinanceToSupabase(pf)),
+              saveCloudSnapshot({
+                users: uMerged.list,
+                products: pMerged.list,
+                sales: sMerged.list,
+                expenses: eMerged.list,
+                customers: cMerged.list,
+                personalFinances: pfMerged.list,
+                rolePermissions: cloudMeta?.rolePermissions || current.rolePermissions
+              }, mergedDeletedIds)
             ]);
-            await saveCloudSnapshot({
-              users: uMerged.list,
-              products: pMerged.list,
-              sales: sMerged.list,
-              expenses: eMerged.list,
-              customers: cMerged.list,
-              personalFinances: pfMerged.list,
-              rolePermissions: cloudMeta?.rolePermissions || current.rolePermissions
-            });
           }
 
           const anyError = uRes.error || pRes.error || sRes.error || eRes.error || cRes.error || pfRes.error;
           const allFailed = uRes.error && pRes.error && sRes.error && eRes.error && cRes.error && pfRes.error;
 
           setSyncStatus({
-            state: allFailed ? "error" : anyError ? "warn" : "ok",
+            state: allFailed ? "error" : (anyError && !hasCloudMeta) ? "warn" : "ok",
             lastSync: nowStr,
-            error: anyError ? (anyError.message || String(anyError)) : null,
+            error: allFailed ? (anyError.message || String(anyError)) : null,
             tableStatus
           });
 
@@ -929,19 +1089,38 @@
         }
       }, [notify, saveCloudSnapshot]);
 
-      // Sincronización inicial, Realtime multi-dispositivo, foco de pestaña e intervalo automático
+      // Sincronización inicial, Realtime Broadcast + Postgres Changes, foco de pestaña e intervalo cada 6s
       useEffect(() => {
         fetchDataFromSupabase(true);
+
+        if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+          try {
+            const bc = new BroadcastChannel("almacen_local_tabs_sync_v2");
+            bc.onmessage = (ev) => {
+              if (ev?.data) applyCloudSnapshotPayload(ev.data);
+            };
+            localBroadcastRef.current = bc;
+          } catch (e) {}
+        }
+
         if (!supabase) return;
 
         let realtimeChannel = null;
         try {
           realtimeChannel = supabase
-            .channel("almacen-multi-device-sync")
+            .channel("almacen-multi-device-sync", {
+              config: { broadcast: { self: false } }
+            })
+            .on("broadcast", { event: "cloud_state_update" }, (msg) => {
+              if (msg?.payload) {
+                applyCloudSnapshotPayload(msg.payload);
+              }
+            })
             .on("postgres_changes", { event: "*", schema: "public" }, () => {
               fetchDataFromSupabase(true);
             })
             .subscribe();
+          realtimeChannelRef.current = realtimeChannel;
         } catch (e) {}
 
         const handleFocusOrOnline = () => {
@@ -958,18 +1137,23 @@
           if (document.visibilityState === "visible") {
             fetchDataFromSupabase(true);
           }
-        }, 15000);
+        }, 6000);
 
         return () => {
           clearInterval(intervalId);
           window.removeEventListener("focus", handleFocusOrOnline);
           window.removeEventListener("online", handleFocusOrOnline);
           document.removeEventListener("visibilitychange", handleFocusOrOnline);
+          if (localBroadcastRef.current) {
+            try { localBroadcastRef.current.close(); } catch (e) {}
+            localBroadcastRef.current = null;
+          }
           if (realtimeChannel) {
             try { supabase.removeChannel(realtimeChannel); } catch (e) {}
+            realtimeChannelRef.current = null;
           }
         };
-      }, [fetchDataFromSupabase]);
+      }, [fetchDataFromSupabase, applyCloudSnapshotPayload]);
 
       useEffect(() => {
         if (currentUser) {
@@ -1057,7 +1241,7 @@
       };
 
       const markDeletedId = (id) => {
-        saveSyncTracker(prev => {
+        return saveSyncTracker(prev => {
           const nextDirty = { ...(prev.dirtyIds || {}) };
           delete nextDirty[id];
           return {
@@ -1089,9 +1273,17 @@
         setCurrentUser(cleanU);
         registerAudit("Registro de Usuario", `${cleanU.email} (${cleanU.role})`, cleanU.name);
         if (supabase) {
-          const { error } = await upsertUserToSupabase(cleanU);
-          if (!error) markSyncedId(cleanU.id);
-          await saveCloudSnapshot({ users: nextUsers });
+          activeSavesCountRef.current += 1;
+          try {
+            const [, { error }] = await Promise.all([
+              saveCloudSnapshot({ users: nextUsers }),
+              upsertUserToSupabase(cleanU)
+            ]);
+            if (!error) markSyncedId(cleanU.id);
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
         }
       };
 
@@ -1103,7 +1295,7 @@
           nextProducts = [updatedEntry, ...products];
           setProducts(nextProducts);
           registerAudit("Producto Creado", `${updatedEntry.name} (${updatedEntry.sku})`);
-          notify("Producto agregado y sincronizando ☁️");
+          notify("Producto agregado y sincronizado ☁️");
         } else {
           updatedEntry = normalizeProduct({ ...productData, id: productModalState.id });
           nextProducts = products.map(p => p.id === productModalState.id ? updatedEntry : p);
@@ -1115,9 +1307,17 @@
         setProductModalState(null);
 
         if (supabase) {
-          const { error } = await upsertProductToSupabase(updatedEntry);
-          if (!error) markSyncedId(updatedEntry.id);
-          await saveCloudSnapshot({ products: nextProducts });
+          activeSavesCountRef.current += 1;
+          try {
+            const [, { error }] = await Promise.all([
+              saveCloudSnapshot({ products: nextProducts }),
+              upsertProductToSupabase(updatedEntry)
+            ]);
+            if (!error) markSyncedId(updatedEntry.id);
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
         }
       };
 
@@ -1125,13 +1325,21 @@
         if (confirm("¿Estás seguro de eliminar este producto del inventario?")) {
           const target = products.find(p => p.id === productId);
           const nextProducts = products.filter(p => p.id !== productId);
-          markDeletedId(productId);
+          const nextTracker = markDeletedId(productId);
           setProducts(nextProducts);
           registerAudit("Producto Eliminado", target?.name || productId);
           notify("Producto eliminado", "warn");
           if (supabase) {
-            await supabase.from("productos").delete().eq("id", productId);
-            await saveCloudSnapshot({ products: nextProducts });
+            activeSavesCountRef.current += 1;
+            try {
+              await Promise.all([
+                saveCloudSnapshot({ products: nextProducts }, nextTracker.deletedIds),
+                supabase.from("productos").delete().eq("id", productId)
+              ]);
+            } finally {
+              activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+              lastSaveFinishedAtRef.current = Date.now();
+            }
           }
         }
       };
@@ -1159,9 +1367,17 @@
         notify(`Traspaso de ${qty} un. sincronizado ☁️`);
         setTransferModalOpen(false);
         if (supabase) {
-          const { error } = await upsertProductToSupabase(updatedProduct);
-          if (!error) markSyncedId(updatedProduct.id);
-          await saveCloudSnapshot({ products: nextProducts });
+          activeSavesCountRef.current += 1;
+          try {
+            const [, { error }] = await Promise.all([
+              saveCloudSnapshot({ products: nextProducts }),
+              upsertProductToSupabase(updatedProduct)
+            ]);
+            if (!error) markSyncedId(updatedProduct.id);
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
         }
       };
 
@@ -1201,48 +1417,66 @@
         markDirtyId(updatedEntry.id);
 
         let nextProducts = products;
+        let deductedProd = null;
         if (stockDeduction && stockDeduction.productId && stockDeduction.qty > 0) {
           const targetProd = products.find(p => p.id === stockDeduction.productId);
           if (targetProd) {
             const locId = stockDeduction.locationId || "loc-tienda";
             const currentLocStock = Number(targetProd.stockByLocation?.[locId] || 0);
-            const updatedProd = normalizeProduct({
+            deductedProd = normalizeProduct({
               ...targetProd,
               stockByLocation: {
                 ...(targetProd.stockByLocation || {}),
                 [locId]: Math.max(0, currentLocStock - stockDeduction.qty)
               }
             });
-            markDirtyId(updatedProd.id);
-            nextProducts = products.map(p => p.id === targetProd.id ? updatedProd : p);
+            markDirtyId(deductedProd.id);
+            nextProducts = products.map(p => p.id === targetProd.id ? deductedProd : p);
             setProducts(nextProducts);
-            if (supabase) {
-              const { error } = await upsertProductToSupabase(updatedProd);
-              if (!error) markSyncedId(updatedProd.id);
-            }
           }
         }
 
-        const nextCustomers = await ensureCustomerExists(saleData.customerName);
         setSaleModalState(null);
 
         if (supabase) {
-          const { error } = await upsertSaleToSupabase(updatedEntry);
-          if (!error) markSyncedId(updatedEntry.id);
-          await saveCloudSnapshot({ sales: nextSales, products: nextProducts, customers: nextCustomers });
+          activeSavesCountRef.current += 1;
+          try {
+            const nextCustomers = await ensureCustomerExists(saleData.customerName);
+            const tasks = [
+              saveCloudSnapshot({ sales: nextSales, products: nextProducts, customers: nextCustomers }),
+              upsertSaleToSupabase(updatedEntry)
+            ];
+            if (deductedProd) {
+              tasks.push(upsertProductToSupabase(deductedProd));
+            }
+            const results = await Promise.all(tasks);
+            if (!results[1]?.error) markSyncedId(updatedEntry.id);
+            if (deductedProd && !results[2]?.error) markSyncedId(deductedProd.id);
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
         }
       };
 
       const handleDeleteSale = async (saleId) => {
         if (confirm("¿Estás seguro de eliminar esta venta del registro?")) {
           const nextSales = sales.filter(s => s.id !== saleId);
-          markDeletedId(saleId);
+          const nextTracker = markDeletedId(saleId);
           setSales(nextSales);
           registerAudit("Venta Eliminada", saleId);
           notify("Venta eliminada", "warn");
           if (supabase) {
-            await supabase.from("ventas").delete().eq("id", saleId);
-            await saveCloudSnapshot({ sales: nextSales });
+            activeSavesCountRef.current += 1;
+            try {
+              await Promise.all([
+                saveCloudSnapshot({ sales: nextSales }, nextTracker.deletedIds),
+                supabase.from("ventas").delete().eq("id", saleId)
+              ]);
+            } finally {
+              activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+              lastSaveFinishedAtRef.current = Date.now();
+            }
           }
         }
       };
@@ -1266,21 +1500,37 @@
         setExpenseModalState(null);
 
         if (supabase) {
-          const { error } = await upsertExpenseToSupabase(updatedEntry);
-          if (!error) markSyncedId(updatedEntry.id);
-          await saveCloudSnapshot({ expenses: nextExpenses });
+          activeSavesCountRef.current += 1;
+          try {
+            const [, { error }] = await Promise.all([
+              saveCloudSnapshot({ expenses: nextExpenses }),
+              upsertExpenseToSupabase(updatedEntry)
+            ]);
+            if (!error) markSyncedId(updatedEntry.id);
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
         }
       };
 
       const handleDeleteExpense = async (expenseId) => {
         if (confirm("¿Estás seguro de eliminar este gasto del registro?")) {
           const nextExpenses = expenses.filter(e => e.id !== expenseId);
-          markDeletedId(expenseId);
+          const nextTracker = markDeletedId(expenseId);
           setExpenses(nextExpenses);
           notify("Gasto eliminado", "warn");
           if (supabase) {
-            await supabase.from("gastos").delete().eq("id", expenseId);
-            await saveCloudSnapshot({ expenses: nextExpenses });
+            activeSavesCountRef.current += 1;
+            try {
+              await Promise.all([
+                saveCloudSnapshot({ expenses: nextExpenses }, nextTracker.deletedIds),
+                supabase.from("gastos").delete().eq("id", expenseId)
+              ]);
+            } finally {
+              activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+              lastSaveFinishedAtRef.current = Date.now();
+            }
           }
         }
       };
@@ -1303,21 +1553,37 @@
         setCustomerModalState(null);
 
         if (supabase) {
-          const { error } = await upsertCustomerToSupabase(updatedEntry);
-          if (!error) markSyncedId(updatedEntry.id);
-          await saveCloudSnapshot({ customers: nextCustomers });
+          activeSavesCountRef.current += 1;
+          try {
+            const [, { error }] = await Promise.all([
+              saveCloudSnapshot({ customers: nextCustomers }),
+              upsertCustomerToSupabase(updatedEntry)
+            ]);
+            if (!error) markSyncedId(updatedEntry.id);
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
         }
       };
 
       const handleDeleteCustomer = async (customerId) => {
         if (confirm("¿Estás seguro de eliminar este cliente del registro?")) {
           const nextCustomers = customers.filter(c => c.id !== customerId);
-          markDeletedId(customerId);
+          const nextTracker = markDeletedId(customerId);
           setCustomers(nextCustomers);
           notify("Cliente eliminado", "warn");
           if (supabase) {
-            await supabase.from("clientes").delete().eq("id", customerId);
-            await saveCloudSnapshot({ customers: nextCustomers });
+            activeSavesCountRef.current += 1;
+            try {
+              await Promise.all([
+                saveCloudSnapshot({ customers: nextCustomers }, nextTracker.deletedIds),
+                supabase.from("clientes").delete().eq("id", customerId)
+              ]);
+            } finally {
+              activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+              lastSaveFinishedAtRef.current = Date.now();
+            }
           }
         }
       };
@@ -1341,21 +1607,37 @@
         setPersonalModalState(null);
 
         if (supabase) {
-          const { error } = await upsertPersonalFinanceToSupabase(updatedEntry);
-          if (!error) markSyncedId(updatedEntry.id);
-          await saveCloudSnapshot({ personalFinances: nextPF });
+          activeSavesCountRef.current += 1;
+          try {
+            const [, { error }] = await Promise.all([
+              saveCloudSnapshot({ personalFinances: nextPF }),
+              upsertPersonalFinanceToSupabase(updatedEntry)
+            ]);
+            if (!error) markSyncedId(updatedEntry.id);
+          } finally {
+            activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+            lastSaveFinishedAtRef.current = Date.now();
+          }
         }
       };
 
       const handleDeletePersonalFinance = async (id) => {
         if (confirm("¿Eliminar este movimiento de tus finanzas personales?")) {
           const nextPF = personalFinances.filter(i => i.id !== id);
-          markDeletedId(id);
+          const nextTracker = markDeletedId(id);
           setPersonalFinances(nextPF);
           notify("Movimiento eliminado", "warn");
           if (supabase) {
-            await supabase.from("finanzas_personales").delete().eq("id", id);
-            await saveCloudSnapshot({ personalFinances: nextPF });
+            activeSavesCountRef.current += 1;
+            try {
+              await Promise.all([
+                saveCloudSnapshot({ personalFinances: nextPF }, nextTracker.deletedIds),
+                supabase.from("finanzas_personales").delete().eq("id", id)
+              ]);
+            } finally {
+              activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+              lastSaveFinishedAtRef.current = Date.now();
+            }
           }
         }
       };
@@ -1964,7 +2246,13 @@
                   setRolePermissions(newPerms);
                   registerAudit("Permisos Actualizados", "Se actualizaron los permisos de rol");
                   notify("Permisos actualizados y sincronizados ☁️");
-                  await saveCloudSnapshot({ rolePermissions: newPerms });
+                  activeSavesCountRef.current += 1;
+                  try {
+                    await saveCloudSnapshot({ rolePermissions: newPerms });
+                  } finally {
+                    activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+                    lastSaveFinishedAtRef.current = Date.now();
+                  }
                 }}
                 auditLog={auditLog}
                 onAddUser={async (u) => {
@@ -1975,9 +2263,17 @@
                   registerAudit("Usuario Creado", `${cleanU.name} (${cleanU.role})`);
                   notify("Usuario agregado y sincronizado ☁️");
                   if (supabase) {
-                    const { error } = await upsertUserToSupabase(cleanU);
-                    if (!error) markSyncedId(cleanU.id);
-                    await saveCloudSnapshot({ users: nextUsers });
+                    activeSavesCountRef.current += 1;
+                    try {
+                      const [, { error }] = await Promise.all([
+                        saveCloudSnapshot({ users: nextUsers }),
+                        upsertUserToSupabase(cleanU)
+                      ]);
+                      if (!error) markSyncedId(cleanU.id);
+                    } finally {
+                      activeSavesCountRef.current = Math.max(0, activeSavesCountRef.current - 1);
+                      lastSaveFinishedAtRef.current = Date.now();
+                    }
                   }
                 }}
               />
