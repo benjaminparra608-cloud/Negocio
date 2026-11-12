@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f17" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Widget Almacén" />
+  <title>⚡ Almacén PRO • Widget Rápido</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: #0b0f17;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100dvh;
+      padding: 12px;
+    }
+    .widget-card {
+      width: 100%;
+      max-width: 440px;
+      background: #0f141f;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75);
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
+    }
+    .header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .title {
+      font-size: 13.5px;
+      font-weight: 800;
+      color: #fbbf24;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pay-pill {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #fcd34d;
+      background: rgba(245, 158, 11, 0.14);
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      padding: 4px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .wallets-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .wallet-box {
+      background: #151b28;
+      border: 1.5px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 10px 9px 8px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 5px;
+      text-align: left;
+    }
+    .wallet-box.active-credit {
+      background: rgba(245, 158, 11, 0.13);
+      border-color: rgba(251, 191, 36, 0.75);
+      box-shadow: 0 0 18px rgba(245, 158, 11, 0.16);
+    }
+    .wallet-box.active-cash {
+      background: rgba(16, 185, 129, 0.13);
+      border-color: rgba(52, 211, 153, 0.75);
+      box-shadow: 0 0 18px rgba(16, 185, 129, 0.16);
+    }
+    .wallet-box.active-debit {
+      background: rgba(14, 165, 233, 0.15);
+      border-color: rgba(56, 189, 248, 0.8);
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.18);
+    }
+    .wallet-label {
+      font-size: 11.5px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+    .wallet-amount {
+      font-size: 15.5px;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.02em;
+    }
+    /* Mini gráfico debajo del número de saldo restante */
+    .mini-chart-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 2px;
+    }
+    .sparkline-svg {
+      width: 100%;
+      height: 22px;
+      display: block;
+      overflow: visible;
+    }
+    .mini-bar-track {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .mini-bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      transition: width 0.3s ease;
+    }
+    .mini-sub {
+      font-size: 10px;
+      color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+    }
+    .inputs-row {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 8px;
+    }
+    .dark-input {
+      width: 100%;
+      background: #151b28;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 11px;
+      padding: 10px 12px;
+      color: #f8fafc;
+      font-size: 14px;
+      font-weight: 700;
+      outline: none;
+    }
+    .dark-input::placeholder {
+      color: #64748b;
+      font-weight: 500;
+    }
+    .dark-input:focus {
+      border-color: rgba(56, 189, 248, 0.6);
+    }
+    .chips-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7px;
+    }
+    .chip-btn {
+      background: #151b28;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 9px;
+      padding: 7px 4px;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .chip-btn:active, .chip-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #f8fafc;
+    }
+    .actions-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 2px;
+    }
+    .btn-minus {
+      background: rgba(127, 29, 29, 0.45);
+      border: 1px solid rgba(248, 113, 113, 0.45);
+      color: #fca5a5;
+      border-radius: 12px;
+      padding: 12px 10px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-minus:active {
+      transform: scale(0.98);
+      background: rgba(185, 28, 28, 0.6);
+    }
+    .btn-plus {
+      background: rgba(6, 78, 59, 0.5);
+      border: 1px solid rgba(52, 211, 153, 0.45);
+      color: #6ee7b7;
+      border-radius: 12px;
+      padding: 12px 10px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-plus:active {
+      transform: scale(0.98);
+      background: rgba(5, 150, 105, 0.65);
+    }
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #64748b;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .sync-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #34d399;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="widget-card">
+    <div class="header-row">
+      <div class="title">⚡ Almacén PRO • Modo Rápido</div>
+      <div id="payPill" class="pay-pill">Pago día 5 (--d)</div>
+    </div>
+
+    <!-- 3 Tarjetas con Mini-Gráfico debajo de cada saldo restante -->
+    <div class="wallets-grid">
+      <!-- Cupo Crédito -->
+      <button type="button" id="cardCredito" class="wallet-box" onclick="selectWallet('Crédito')">
+        <div class="wallet-label" style="color: #fbbf24;">💎 Cupo Créd.</div>
+        <div id="valCredito" class="wallet-amount">$0</div>
+        <div class="mini-chart-wrap">
+          <svg id="sparkCredito" class="sparkline-svg" viewBox="0 0 100 22" preserveAspectRatio="none"></svg>
+          <div class="mini-bar-track">
+            <div id="barCredito" class="mini-bar-fill" style="width: 75%; background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div>
+          </div>
+          <div class="mini-sub">
+            <span id="subCredito">Libre</span>
+            <span id="pctCredito">100%</span>
+          </div>
+        </div>
+      </button>
+
+      <!-- Efectivo -->
+      <button type="button" id="cardEfectivo" class="wallet-box" onclick="selectWallet('Efectivo')">
+        <div class="wallet-label" style="color: #34d399;">💵 Efectivo</div>
+        <div id="valEfectivo" class="wallet-amount">$0</div>
+        <div class="mini-chart-wrap">
+          <svg id="sparkEfectivo" class="sparkline-svg" viewBox="0 0 100 22" preserveAspectRatio="none"></svg>
+          <div class="mini-bar-track">
+            <div id="barEfectivo" class="mini-bar-fill" style="width: 50%; background: linear-gradient(90deg, #10b981, #34d399);"></div>
+          </div>
+          <div class="mini-sub">
+            <span>Bolsillo</span>
+            <span id="pctEfectivo">--%</span>
+          </div>
+        </div>
+      </button>
+
+      <!-- Tarjeta Débito -->
+      <button type="button" id="cardTarjeta" class="wallet-box active-debit" onclick="selectWallet('Tarjeta')">
+        <div class="wallet-label" style="color: #38bdf8;">💳 T. Débito</div>
+        <div id="valTarjeta" class="wallet-amount">$0</div>
+        <div class="mini-chart-wrap">
+          <svg id="sparkTarjeta" class="sparkline-svg" viewBox="0 0 100 22" preserveAspectRatio="none"></svg>
+          <div class="mini-bar-track">
+            <div id="barTarjeta" class="mini-bar-fill" style="width: 50%; background: linear-gradient(90deg, #0284c7, #38bdf8);"></div>
+          </div>
+          <div class="mini-sub">
+            <span>Banco</span>
+            <span id="pctTarjeta">--%</span>
+          </div>
+        </div>
+      </button>
+    </div>
+
+    <!-- Inputs de Monto y Concepto -->
+    <div class="inputs-row">
+      <input id="inpAmount" class="dark-input" type="number" inputmode="numeric" value="15000" placeholder="Monto $" />
+      <input id="inpDesc" class="dark-input" type="text" placeholder="Concepto (ej. Supermercado)" />
+    </div>
+
+    <!-- Chips de monto rápido -->
+    <div class="chips-row">
+      <button type="button" class="chip-btn" onclick="setQuickAmount(5000)">$5.000</button>
+      <button type="button" class="chip-btn" onclick="setQuickAmount(15000)">$15.000</button>
+      <button type="button" class="chip-btn" onclick="setQuickAmount(30000)">$30.000</button>
+      <button type="button" class="chip-btn" onclick="setQuickAmount(50000)">$50.000</button>
+    </div>
+
+    <!-- Botones de Acción Directa -->
+    <div class="actions-row">
+      <button type="button" id="btnMinus" class="btn-minus" onclick="submitMovement('gasto')">
+        - Restar de Tarjeta
+      </button>
+      <button type="button" id="btnPlus" class="btn-plus" onclick="submitMovement('ingreso')">
+        + Agregar a Tarjeta
+      </button>
+    </div>
+
+    <div class="status-bar">
+      <span id="statusText"><span class="sync-dot"></span>Conectado directo a Supabase</span>
+      <span style="cursor:pointer; color:#38bdf8; font-weight:600;" onclick="fetchFromSupabase()">↻ Actualizar</span>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://bcnkbsiqrcoosasjlypc.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJjbmtic2lxcmNvb3Nhc2pseXBjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc1ODA3NTYsImV4cCI6MjEwMzE1Njc1Nn0._MLWTyHL7fBIhYhIwvrguIcDqwz7D9uFoRSCbqPo6pU";
+    const META_SYNC_ID = "__almacen_sync_meta_v2__";
+    const LOCAL_BACKUP_KEY = "negocio_local_cache_v2";
+    const CREDIT_CARD_CONFIG_KEY = "negocio_credit_card_config_v2";
+
+    let selectedWallet = "Tarjeta";
+    let personalFinances = [];
+    let creditCardConfig = {
+      cardName: "Tarjeta de Crédito Principal",
+      totalLimit: 1000000,
+      baseUsed: 0,
+      paymentDay: 5,
+      billingDay: 25
+    };
+    let fullCloudSnapshot = null;
+
+    const money = (v) => "$" + Math.round(Number(v) || 0).toLocaleString("es-CL");
+
+    function getPersonalWallet(item) {
+      if (item?.wallet === "Efectivo" || item?.wallet === "Tarjeta" || item?.wallet === "Crédito") return item.wallet;
+      const desc = String(item?.description || "");
+      if (desc.startsWith("[Efectivo]")) return "Efectivo";
+      if (desc.startsWith("[Crédito]") || desc.startsWith("[Credito]")) return "Crédito";
+      return "Tarjeta";
+    }
+
+    function calcDaysUntil(dayOfMonth) {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const maxThis = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      let nextDate = new Date(now.getFullYear(), now.getMonth(), Math.min(dayOfMonth, maxThis));
+      if (nextDate < today) {
+        const maxNext = new Date(now.getFullYear(), now.getMonth() + 2, 0).getDate();
+        nextDate = new Date(now.getFullYear(), now.getMonth() + 1, Math.min(dayOfMonth, maxNext));
+      }
+      return Math.max(0, Math.round((nextDate - today) / 86400000));
+    }
+
+    function buildSparkline(svgId, points, strokeColor, fillColor) {
+      const svg = document.getElementById(svgId);
+      if (!svg) return;
+      const vals = points.length >= 2 ? points : [points[0] || 1, points[0] || 1];
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      const range = max - min || 1;
+      const coords = vals.map((v, idx) => {
+        const x = (idx / (vals.length - 1)) * 100;
+        const y = 19 - ((v - min) / range) * 15;
+        return [x, y];
+      });
+      const linePoints = coords.map(c => `${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(" ");
+      const areaPoints = `0,22 ${linePoints} 100,22`;
+      const last = coords[coords.length - 1];
+      svg.innerHTML = `
+        <polygon points="${areaPoints}" fill="${fillColor}" opacity="0.22"></polygon>
+        <polyline fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${linePoints}"></polyline>
+        <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="${strokeColor}"></circle>
+      `;
+    }
+
+    function computeHistorySeries(walletType, currentTotal) {
+      const filtered = personalFinances.filter(f => getPersonalWallet(f) === walletType).slice(0, 6).reverse();
+      if (filtered.length === 0) {
+        return [currentTotal * 0.85, currentTotal * 0.9, currentTotal * 0.88, currentTotal * 0.95, currentTotal];
+      }
+      let running = currentTotal;
+      const reverseSteps = [running];
+      for (let i = filtered.length - 1; i >= 0; i--) {
+        const m = filtered[i];
+        const amt = Number(m.amount || 0);
+        if (walletType === "Crédito") {
+          running = m.type === "gasto" ? running + amt : running - amt;
+        } else {
+          running = m.type === "ingreso" ? running - amt : running + amt;
+        }
+        reverseSteps.push(Math.max(0, running));
+      }
+      return reverseSteps.reverse();
+    }
+
+    function renderUI() {
+      const cashIn = personalFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const cashOut = personalFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Efectivo").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const cashBal = cashIn - cashOut;
+
+      const cardIn = personalFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const cardOut = personalFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Tarjeta").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const cardBal = cardIn - cardOut;
+
+      const credPurchases = personalFinances.filter(f => f.type === "gasto" && getPersonalWallet(f) === "Crédito").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const credPayments = personalFinances.filter(f => f.type === "ingreso" && getPersonalWallet(f) === "Crédito").reduce((a, b) => a + Number(b.amount || 0), 0);
+      const totalLimit = Math.max(0, Number(creditCardConfig.totalLimit || 1000000));
+      const usedCredit = Math.max(0, Number(creditCardConfig.baseUsed || 0) + credPurchases - credPayments);
+      const availCredit = Math.max(0, totalLimit - usedCredit);
+      const availCreditPct = totalLimit > 0 ? Math.min(100, Math.max(0, (availCredit / totalLimit) * 100)) : 0;
+
+      const totalLiquid = Math.max(1, Math.max(0, cashBal) + Math.max(0, cardBal));
+      const cashShare = Math.min(100, Math.max(8, (Math.max(0, cashBal) / totalLiquid) * 100));
+      const cardShare = Math.min(100, Math.max(8, (Math.max(0, cardBal) / totalLiquid) * 100));
+
+      document.getElementById("valCredito").textContent = money(availCredit);
+      document.getElementById("valEfectivo").textContent = money(cashBal);
+      document.getElementById("valTarjeta").textContent = money(cardBal);
+
+      document.getElementById("barCredito").style.width = availCreditPct.toFixed(0) + "%";
+      document.getElementById("pctCredito").textContent = availCreditPct.toFixed(0) + "%";
+      document.getElementById("barEfectivo").style.width = cashShare.toFixed(0) + "%";
+      document.getElementById("pctEfectivo").textContent = Math.round((Math.max(0, cashBal) / totalLiquid) * 100) + "%";
+      document.getElementById("barTarjeta").style.width = cardShare.toFixed(0) + "%";
+      document.getElementById("pctTarjeta").textContent = Math.round((Math.max(0, cardBal) / totalLiquid) * 100) + "%";
+
+      const payDay = Number(creditCardConfig.paymentDay || 5);
+      const daysLeft = calcDaysUntil(payDay);
+      document.getElementById("payPill").textContent = `Pago día ${payDay} (${daysLeft}d)`;
+
+      buildSparkline("sparkCredito", computeHistorySeries("Crédito", availCredit), "#fbbf24", "#f59e0b");
+      buildSparkline("sparkEfectivo", computeHistorySeries("Efectivo", cashBal), "#34d399", "#10b981");
+      buildSparkline("sparkTarjeta", computeHistorySeries("Tarjeta", cardBal), "#38bdf8", "#0ea5e9");
+    }
+
+    function selectWallet(w) {
+      selectedWallet = w;
+      document.getElementById("cardCredito").className = "wallet-box" + (w === "Crédito" ? " active-credit" : "");
+      document.getElementById("cardEfectivo").className = "wallet-box" + (w === "Efectivo" ? " active-cash" : "");
+      document.getElementById("cardTarjeta").className = "wallet-box" + (w === "Tarjeta" ? " active-debit" : "");
+
+      const btnMinus = document.getElementById("btnMinus");
+      const btnPlus = document.getElementById("btnPlus");
+      if (w === "Crédito") {
+        btnMinus.textContent = "- Usar Cupo Créd.";
+        btnPlus.textContent = "+ Pagar Cupo Créd.";
+      } else {
+        btnMinus.textContent = `- Restar de ${w}`;
+        btnPlus.textContent = `+ Agregar a ${w}`;
+      }
+    }
+
+    function setQuickAmount(v) {
+      document.getElementById("inpAmount").value = v;
+    }
+
+    async function fetchFromSupabase() {
+      const statusEl = document.getElementById("statusText");
+      statusEl.innerHTML = `<span class="sync-dot" style="background:#fbbf24;"></span>Sincronizando...`;
+      try {
+        try {
+          const localRaw = JSON.parse(localStorage.getItem(LOCAL_BACKUP_KEY) || "null");
+          if (localRaw?.personalFinances) personalFinances = localRaw.personalFinances;
+          if (localRaw?.creditCardConfig) creditCardConfig = { ...creditCardConfig, ...localRaw.creditCardConfig };
+        } catch (e) {}
+
+        const headers = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
+        const [pfRes, cRes] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/finanzas_personales?select=*`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/clientes?id=eq.${encodeURIComponent(META_SYNC_ID)}&select=*`, { headers })
+        ]);
+
+        if (cRes.ok) {
+          const cData = await cRes.json();
+          if (cData?.[0]?.phone) {
+            const parsed = JSON.parse(cData[0].phone);
+            fullCloudSnapshot = parsed;
+            if (Array.isArray(parsed.personalFinances)) personalFinances = parsed.personalFinances;
+            if (parsed.creditCardConfig) creditCardConfig = { ...creditCardConfig, ...parsed.creditCardConfig };
+          }
+        }
+        if (pfRes.ok) {
+          const pfData = await pfRes.json();
+          if (Array.isArray(pfData) && pfData.length > 0 && !fullCloudSnapshot?.personalFinances) {
+            personalFinances = pfData.filter(r => r.id !== META_SYNC_ID);
+          }
+        }
+        renderUI();
+        statusEl.innerHTML = `<span class="sync-dot"></span>Sincronizado con Supabase`;
+      } catch (err) {
+        renderUI();
+        statusEl.innerHTML = `<span class="sync-dot" style="background:#f87171;"></span>Modo Local`;
+      }
+    }
+
+    async function submitMovement(type) {
+      const amt = Math.max(0, Number(document.getElementById("inpAmount").value) || 0);
+      if (amt <= 0) return;
+      const rawDesc = document.getElementById("inpDesc").value.trim();
+      const today = new Date().toISOString().slice(0, 10);
+      const category = selectedWallet === "Crédito"
+        ? (type === "ingreso" ? "Pago / Abono Tarjeta de Crédito" : "Compras con Tarjeta de Crédito")
+        : (type === "ingreso" ? "Retiro de Ganancias" : "Compras Personales");
+
+      const newEntry = {
+        id: "pf-" + Date.now(),
+        date: today,
+        type,
+        wallet: selectedWallet,
+        category,
+        description: rawDesc || category,
+        amount: amt
+      };
+
+      personalFinances = [newEntry, ...personalFinances];
+      document.getElementById("inpDesc").value = "";
+      renderUI();
+
+      const statusEl = document.getElementById("statusText");
+      statusEl.innerHTML = `<span class="sync-dot" style="background:#fbbf24;"></span>Guardando en la nube...`;
+
+      try {
+        const localCache = JSON.parse(localStorage.getItem(LOCAL_BACKUP_KEY) || "{}");
+        localCache.personalFinances = personalFinances;
+        localCache.updatedAt = Date.now();
+        localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(localCache));
+      } catch (e) {}
+
+      try {
+        const headers = {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates"
+        };
+
+        await fetch(`${SUPABASE_URL}/rest/v1/finanzas_personales`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            id: newEntry.id,
+            date: newEntry.date,
+            type: newEntry.type,
+            category: newEntry.category,
+            description: `[${newEntry.wallet}] ${newEntry.description}`,
+            amount: newEntry.amount
+          })
+        });
+
+        const snapshotPayload = {
+          ...(fullCloudSnapshot || {}),
+          personalFinances,
+          creditCardConfig,
+          updatedAt: Date.now()
+        };
+        fullCloudSnapshot = snapshotPayload;
+        const serialized = JSON.stringify(snapshotPayload);
+
+        await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/clientes`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ id: META_SYNC_ID, name: "__sync_v2__", phone: serialized })
+          }),
+          fetch(`${SUPABASE_URL}/rest/v1/gastos`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ id: META_SYNC_ID, date: "1970-01-01", category: "__sync_v2__", description: serialized, amount: 0 })
+          })
+        ]);
+
+        statusEl.innerHTML = `<span class="sync-dot"></span>¡Guardado! (${type === "ingreso" ? "+" : "-"}${money(amt)} en ${selectedWallet})`;
+      } catch (err) {
+        statusEl.innerHTML = `<span class="sync-dot" style="background:#f87171;"></span>Guardado local`;
+      }
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("wallet")) {
+      const w = params.get("wallet");
+      if (w === "Crédito" || w === "Efectivo" || w === "Tarjeta") selectWallet(w);
+    } else {
+      selectWallet("Tarjeta");
+    }
+    fetchFromSupabase();
+  </script>
+</body>
+</html>

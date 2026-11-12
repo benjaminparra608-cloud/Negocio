@@ -998,6 +998,20 @@
             finanzas_personales: pfRes.error ? pfRes.error.message : `OK (${(pfRes.data || []).filter(r => r.id !== META_SYNC_ID).length})`
           };
 
+          const anyError = uRes.error || pRes.error || sRes.error || eRes.error || cRes.error || pfRes.error;
+          const allFailed = Boolean(uRes.error && pRes.error && sRes.error && eRes.error && cRes.error && pfRes.error);
+
+          // Si Supabase está pausado o sin conexión (todas las tablas fallaron), no tocar estado ni borrar dirtyIds
+          if (allFailed) {
+            setSyncStatus({
+              state: "error",
+              lastSync: getSyncTracker().lastSyncAt || null,
+              error: anyError?.message || "No se pudo conectar con Supabase (verifica que el proyecto esté activo)",
+              tableStatus
+            });
+            return;
+          }
+
           // Buscar el espejo global (__almacen_sync_meta_v2__) más reciente entre todas las tablas disponibles
           const metaCandidates = [
             (cRes.data || []).find(r => r.id === META_SYNC_ID)?.phone,
@@ -1074,13 +1088,14 @@
                   return;
                 }
 
-                // Si aún no existe espejo en la nube (primera sincronización del proyecto), incorporar datos locales
+                // Si aún no existe espejo en la nube (o el proyecto estuvo pausado sin espejo), rescatar y subir registros creados localmente
                 if (!hasCloudMeta && !remoteById.has(id)) {
-                  const wasAlreadySynced = Boolean(tracker.syncedIds?.[id]);
-                  if (wasAlreadySynced) return;
                   const initItem = initialById.get(id);
+                  const isUserCreatedItem = !initItem;
+                  const wasAlreadySynced = Boolean(tracker.syncedIds?.[id]);
+                  if (wasAlreadySynced && !isUserCreatedItem) return;
                   const isUntouchedMock = initItem && JSON.stringify(initItem) === JSON.stringify(localItem);
-                  if (!isUntouchedMock || remoteById.size === 0) {
+                  if (isUserCreatedItem || !isUntouchedMock || remoteById.size === 0) {
                     resultById.set(id, localItem);
                     toUpload.push(localItem);
                   }
@@ -1131,23 +1146,6 @@
             setRolePermissions(prev => ({ ...defaultRolePermissions, ...prev, ...cloudMeta.rolePermissions }));
           }
 
-          // Marcar todos los IDs actuales como sincronizados
-          const newSyncedIds = { ...(tracker.syncedIds || {}) };
-          [
-            ...uMerged.list, ...pMerged.list, ...sMerged.list,
-            ...eMerged.list, ...cMerged.list, ...pfMerged.list
-          ].forEach(item => { if (item?.id) newSyncedIds[item.id] = true; });
-
-          const nowStr = new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-          saveSyncTracker({
-            syncedIds: newSyncedIds,
-            deletedIds: mergedDeletedIds,
-            dirtyIds: {},
-            initialized: true,
-            lastSyncAt: nowStr,
-            lastCloudUpdatedAt: localUpdatedAtRef.current
-          });
-
           // Subir únicamente si había cambios locales pendientes (dirtyIds) o si la nube aún no tenía espejo inicial
           const totalToUpload =
             uMerged.toUpload.length + pMerged.toUpload.length + sMerged.toUpload.length +
@@ -1174,13 +1172,27 @@
             ]);
           }
 
-          const anyError = uRes.error || pRes.error || sRes.error || eRes.error || cRes.error || pfRes.error;
-          const allFailed = uRes.error && pRes.error && sRes.error && eRes.error && cRes.error && pfRes.error;
+          // Marcar todos los IDs actuales como sincronizados una vez completada la lectura/subida exitosa
+          const newSyncedIds = { ...(tracker.syncedIds || {}) };
+          [
+            ...uMerged.list, ...pMerged.list, ...sMerged.list,
+            ...eMerged.list, ...cMerged.list, ...pfMerged.list
+          ].forEach(item => { if (item?.id) newSyncedIds[item.id] = true; });
+
+          const nowStr = new Date().toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          saveSyncTracker({
+            syncedIds: newSyncedIds,
+            deletedIds: mergedDeletedIds,
+            dirtyIds: {},
+            initialized: true,
+            lastSyncAt: nowStr,
+            lastCloudUpdatedAt: localUpdatedAtRef.current
+          });
 
           setSyncStatus({
-            state: allFailed ? "error" : (anyError && !hasCloudMeta) ? "warn" : "ok",
+            state: (anyError && !hasCloudMeta) ? "warn" : "ok",
             lastSync: nowStr,
-            error: allFailed ? (anyError.message || String(anyError)) : null,
+            error: null,
             tableStatus
           });
 
@@ -3587,6 +3599,15 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
                 <option value="Crédito">💎 Solo Tarjeta de Crédito (Cupo)</option>
               </select>
 
+              <a
+                href="widget.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...styles.amberBtn, textDecoration: "none" }}
+                title="Abrir Widget Rápido independiente para móvil"
+              >
+                <Icon name="smartphone" size={14} color="#FEF3C7" /> ⚡ Modo Widget
+              </a>
               <button style={styles.purpleExportBtn} onClick={() => onExport(filteredFinances, currentPeriodLabel, periodIncome, periodExpense, periodBalance, cashBalance, cardBalance)}>
                 <Icon name="file-spreadsheet" size={14} color="#C084FC" /> Exportar Sheets
               </button>
