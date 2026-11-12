@@ -3,7 +3,7 @@
 // icon-color: deep-purple; icon-glyph: bolt;
 
 /**
- * ⚡ ALMACÉN PRO • WIDGET NATIVO PARA IPHONE (SCRIPTABLE)
+ * ⚡ NEGOCIO • WIDGET NATIVO PARA IPHONE (SCRIPTABLE)
  * - Muestra en el escritorio de tu iPhone el diseño oscuro con las 3 tarjetas
  *   (💎 Cupo Créd., 💵 Efectivo, 💳 T. Débito) y un MINI-GRÁFICO debajo de cada saldo.
  * - Al tocar el widget en tu pantalla de inicio, abre un menú nativo de iOS
@@ -12,9 +12,9 @@
  *
  * CÓMO USARLO EN IPHONE:
  * 1. Descarga la app gratuita "Scriptable" en la App Store.
- * 2. Toca "+" arriba a la derecha, pega este código y nómbralo: AlmacenPRO
+ * 2. Toca "+" arriba a la derecha, pega este código y nómbralo: Negocio
  * 3. En la pantalla de inicio de tu iPhone, mantén presionado el fondo -> "+" -> Scriptable (Tamaño Mediano).
- * 4. Mantén presionado el widget -> "Editar Widget" -> Script: AlmacenPRO -> When Interacting: "Run Script".
+ * 4. Mantén presionado el widget -> "Editar Widget" -> Script: Negocio -> When Interacting: "Run Script".
  */
 
 const SUPABASE_URL = "https://bcnkbsiqrcoosasjlypc.supabase.co";
@@ -166,7 +166,7 @@ function drawMiniChartImage(points, pctFree, hexColor) {
 // Menú interactivo nativo de iOS (NO abre Safari ni ninguna página web)
 async function promptInteractiveMenu(data) {
   const walletAlert = new Alert();
-  walletAlert.title = "⚡ Almacén PRO • Modo Rápido";
+  walletAlert.title = "⚡ Negocio • Modo Rápido";
   walletAlert.message = "Selecciona dónde deseas restar o agregar dinero/cupo:";
   walletAlert.addAction("💎 Cupo Tarjeta de Crédito");
   walletAlert.addAction("💵 Efectivo en Bolsillo");
@@ -245,7 +245,7 @@ widget.setPadding(12, 14, 12, 14);
 const header = widget.addStack();
 header.layoutHorizontally();
 header.centerAlignContent();
-const titleTxt = header.addText("⚡ Almacén PRO • Modo Rápido");
+const titleTxt = header.addText("⚡ Negocio • Modo Rápido");
 titleTxt.font = Font.boldSystemFont(12);
 titleTxt.textColor = new Color("#fbbf24");
 header.addSpacer();

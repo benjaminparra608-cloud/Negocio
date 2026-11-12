@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07090e" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Almacén PRO" />
+  <meta name="apple-mobile-web-app-title" content="Negocio" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
@@ -14,7 +14,7 @@
   <!-- Favicon / Logo de la pestaña -->
   <link rel="icon" type="image/png" href="logo.png" />
   <link rel="apple-touch-icon" href="logo.png" />
-  <title>Almacén PRO - Control Comercial & Espacio Personal</title>
+  <title>Negocio - Control Comercial & Espacio Personal</title>
   <!-- Supabase Client CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- React & Babel CDN -->
@@ -1941,12 +1941,12 @@
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <img
                   src="logo.png"
-                  alt="Logo Almacén"
+                  alt="Logo Negocio"
                   onError={(e) => { e.target.style.display = "none"; }}
                   style={{ width: 30, height: 30, objectFit: "contain" }}
                 />
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#F8FAFC", lineHeight: 1.1 }}>Almacén PRO</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#F8FAFC", lineHeight: 1.1 }}>Negocio</div>
                   <div style={{ fontSize: 10, color: role === "Personal" ? "#C084FC" : "#34D399", fontWeight: 600 }}>
                     {currentUser.name} • {currentUser.role}
                   </div>
@@ -1991,12 +1991,12 @@
               <div style={styles.brand}>
                 <img
                   src="logo.png"
-                  alt="Logo Almacén"
+                  alt="Logo Negocio"
                   onError={(e) => { e.target.style.display = "none"; }}
                   style={{ width: 36, height: 36, objectFit: "contain" }}
                 />
                 <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setSyncModalOpen(true)} title="Abrir Centro de Sincronización">
-                  <div style={styles.brandTitle}>Almacén</div>
+                  <div style={styles.brandTitle}>Negocio</div>
                   <div style={{ ...styles.brandSub, color: syncStatus.state === "error" ? "#FCA5A5" : syncStatus.state === "warn" ? "#FCD34D" : "#6EE7B7" }}>
                     {!isSupabaseConfigured
                       ? "💾 Modo Local"
@@ -4842,7 +4842,7 @@ ALTER TABLE finanzas_personales DISABLE ROW LEVEL SECURITY;`;
               <div style={styles.authLogo}>
                 <Icon name="boxes" size={24} color="#EDEAE1" />
               </div>
-              <h2 style={{ color: "#F8FAFC", margin: "10px 0 4px", fontSize: 22, fontWeight: 700 }}>Almacén PRO</h2>
+              <h2 style={{ color: "#F8FAFC", margin: "10px 0 4px", fontSize: 22, fontWeight: 700 }}>Negocio</h2>
               <p style={{ color: "#94A3B8", fontSize: 13 }}>Gestión Multi-Bodega & Finanzas Personales</p>
             </div>
 
